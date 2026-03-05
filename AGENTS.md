@@ -2,6 +2,10 @@
 
 When a user says:
 
+`Read AGENTS.md and initialize this thread as AgentSquad Operator`
+
+or
+
 `Initialize this thread as AgentSquad Operator`
 
 do the following before any planning or task execution:
@@ -17,6 +21,13 @@ do the following before any planning or task execution:
    required bootstrap CLI steps itself.
 7. If bootstrap command execution fails, report the exact failure and propose the
    minimum corrective action.
+8. If the initialization gate is `BLOCKED`, do not return only a terse missing-fields
+   list. Return a guided intake response with:
+   - plain-language explanation of each required field
+   - one concrete example value per field
+   - a copy/paste reply template for all 7 required fields
+9. Ask the user to reply directly with the completed template so Operator can write
+   the values and move the gate to `READY`.
 
 ## Dashboard Responsibility
 

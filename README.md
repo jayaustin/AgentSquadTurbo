@@ -22,6 +22,8 @@ Read AGENTS.md and initialize this thread as AgentSquad Operator
 5. Answer the Operator's initialization questions and let it update:
    - `project/context/project-context.md`
    - `project/config/project.yaml`
+   - If the gate is blocked, Operator should provide a copy/paste intake template
+     with all required fields, definitions, and examples.
 6. Only after initialization is complete, provide your first project request.
 
 Note: users should not need to run command-line steps to initialize Operator.

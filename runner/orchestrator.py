@@ -22,6 +22,43 @@ INITIALIZATION_REQUIRED_CONTEXT_FIELDS = (
     "Primary deliverables",
     "Acceptance criteria",
 )
+INITIALIZATION_INTAKE_GUIDANCE: tuple[tuple[str, str, str], ...] = (
+    (
+        "project.id",
+        "A short stable ID used in logs and files. Use lowercase kebab-case.",
+        "acme-subscription-optimizer",
+    ),
+    (
+        "project.name",
+        "Human-readable project name shown in prompts and dashboard.",
+        "Acme Subscription Optimizer",
+    ),
+    (
+        "Project goals",
+        "What business or product outcomes must this project achieve?",
+        "Increase paid conversions by 15% within Q3 while reducing onboarding drop-off.",
+    ),
+    (
+        "Target users",
+        "Who this project is for. Include primary audience and key traits.",
+        "SMB owners managing recurring billing with minimal technical staff.",
+    ),
+    (
+        "Key constraints",
+        "Hard limits to respect (time, budget, tech stack, policy, compliance, etc.).",
+        "Must ship in 6 weeks, no paid third-party APIs, Python + PowerShell only.",
+    ),
+    (
+        "Primary deliverables",
+        "Concrete outputs expected from the framework (docs, code, tests, assets).",
+        "Technical spec, UX spec, localization plan, implementation backlog, validated scripts.",
+    ),
+    (
+        "Acceptance criteria",
+        "How you will decide the project is done; include measurable checks.",
+        "All P1 tasks Done, QA sign-off complete, localization covers EN/ES/FR, docs approved.",
+    ),
+)
 UNSET_VALUE_MARKERS = {"", "tbd", "todo", "n/a", "na", "unknown"}
 DEFAULT_OPERATOR_BOOTSTRAP_PACKET = "project/state/operator-bootstrap.md"
 
@@ -693,6 +730,66 @@ def _project_initialization_issues(root: Path, runtime: dict[str, Any]) -> list[
     return issues
 
 
+def _initialization_prompt_default(field_name: str, current_value: str) -> str:
+    if _is_value_defined(current_value):
+        return current_value
+    if field_name == "project.id":
+        return "<your-project-id>"
+    if field_name == "project.name":
+        return "<your-project-name>"
+    return "<fill-this>"
+
+
+def _bootstrap_intake_lines(root: Path, config: dict[str, Any]) -> list[str]:
+    lines: list[str] = []
+    project = config.get("project", {})
+    project_id = str(project.get("id", "")).strip()
+    project_name = str(project.get("name", "")).strip()
+    if project_id == "sample-project":
+        project_id = ""
+    if project_name.lower() == "sample project":
+        project_name = ""
+
+    context_values = {label: "" for label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS}
+    context_path = root / "project" / "context" / "project-context.md"
+    if context_path.exists():
+        context_text = context_path.read_text(encoding="utf-8")
+        for label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS:
+            context_values[label] = _extract_project_context_value(context_text, label)
+
+    values: dict[str, str] = {"project.id": project_id, "project.name": project_name}
+    values.update(context_values)
+
+    lines.append("## What To Send Next (Copy/Paste Template)")
+    lines.append("")
+    lines.append("Reply with values for all 7 fields below. Keep each answer specific and concrete.")
+    lines.append("Avoid placeholders such as `TBD`, `N/A`, or `Unknown`.")
+    lines.append("")
+    lines.append("```text")
+    lines.append(
+        f"project.id: {_initialization_prompt_default('project.id', values.get('project.id', ''))}"
+    )
+    lines.append(
+        f"project.name: {_initialization_prompt_default('project.name', values.get('project.name', ''))}"
+    )
+    for label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS:
+        lines.append(f"{label}: {_initialization_prompt_default(label, values.get(label, ''))}")
+    lines.append("```")
+    lines.append("")
+    lines.append("### Field Guidance")
+    lines.append("")
+    for field_name, description, example in INITIALIZATION_INTAKE_GUIDANCE:
+        lines.append(f"- `{field_name}`: {description} Example: `{example}`")
+    lines.append("")
+    lines.append(
+        "After you reply, Operator should write the values into "
+        "`project/config/project.yaml` and `project/context/project-context.md`, "
+        "then continue initialization to `READY`."
+    )
+    lines.append("")
+    return lines
+
+
 def _operator_bootstrap_packet(
     root: Path,
     config: dict[str, Any],
@@ -723,6 +820,8 @@ def _operator_bootstrap_packet(
         lines.append("")
         for issue in init_issues:
             lines.append(f"- {issue}")
+        lines.append("")
+        lines.extend(_bootstrap_intake_lines(root, config))
     else:
         lines.append("Status: `READY`")
         lines.append("")
@@ -774,7 +873,7 @@ def cmd_bootstrap_operator(args: argparse.Namespace) -> int:
     else:
         print("Initialization gate: READY")
     print("Recommended short prompt:")
-    print("Initialize this thread as AgentSquad Operator")
+    print("Read AGENTS.md and initialize this thread as AgentSquad Operator")
 
     if args.print_packet:
         print("")
