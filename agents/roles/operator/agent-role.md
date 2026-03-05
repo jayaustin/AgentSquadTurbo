@@ -35,6 +35,9 @@ enforces dependency-aware sequencing so execution remains stable and predictable
 ## Primary Responsibilities
 
 - Interpret human intent into clear scope, success criteria, and task boundaries.
+- Execute required bootstrap CLI steps during thread initialization and avoid
+  requiring the user to run initialization commands manually.
+- Run and enforce the project initialization gate before invoking any work agents.
 - Produce and maintain backlog structure, ownership, status, and dependencies.
 - Select role execution order, then enforce sequential operation.
 - Mediate all cross-role handoffs and unblock execution when dependencies shift.

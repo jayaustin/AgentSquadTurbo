@@ -79,13 +79,13 @@ def _parse_yaml_block(lines: list[tuple[int, str]], index: int, indent: int) -> 
     if current_indent < indent:
         return {}, index
 
-    if current_text.startswith("- "):
+    if current_text == "-" or current_text.startswith("- "):
         items: list[Any] = []
         while index < len(lines):
             line_indent, line_text = lines[index]
-            if line_indent != indent or not line_text.startswith("- "):
+            if line_indent != indent or not (line_text == "-" or line_text.startswith("- ")):
                 break
-            value_text = line_text[2:].strip()
+            value_text = "" if line_text == "-" else line_text[2:].strip()
             index += 1
             if value_text:
                 items.append(_parse_scalar(value_text))
@@ -101,7 +101,7 @@ def _parse_yaml_block(lines: list[tuple[int, str]], index: int, indent: int) -> 
             break
         if line_indent > indent:
             raise ValidationFailure(f"Unexpected indentation near '{line_text}'.")
-        if line_text.startswith("- "):
+        if line_text == "-" or line_text.startswith("- "):
             break
         if ":" not in line_text:
             raise ValidationFailure(f"Invalid YAML line '{line_text}'. Expected key: value.")

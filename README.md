@@ -10,27 +10,22 @@ To use this framework for a new project:
 
 1. Clone this repository into a new project directory.
 2. Open the cloned folder in your IDE agent environment (for example Codex, Roo, or Kiro).
-3. Start a fresh agent thread and paste this prompt:
+3. Start a fresh IDE agent thread and use this short prompt:
 
 ```text
-Initialize this thread as AgentSquad Operator.
-
-Do the following in order:
-1) Load and apply context from:
-   - steering/00-core-rules.md
-   - steering/01-context-lifecycle.md
-   - steering/02-backlog-governance.md
-   - steering/03-handoff-protocol.md
-   - agents/roles/operator/agent-role.md
-   - project/context/project-context.md
-   - project/context/role-overrides/operator.md (only if it exists)
-2) Validate required files exist; halt and report any missing file.
-3) Read project/config/project.yaml and backlog.md.
-4) Confirm active role is `operator` and summarize operating constraints.
-5) Ask for my project request, then produce `operator_plan` JSON only using runner/templates/json-contracts.md.
+Initialize this thread as AgentSquad Operator
 ```
 
-After this bootstrap prompt, provide your project request in the next message.
+4. The IDE agent should run all required bootstrap CLI commands automatically:
+   - generate `project/state/operator-bootstrap.md`
+   - load and follow the generated bootstrap packet
+5. Answer the Operator's initialization questions and let it update:
+   - `project/context/project-context.md`
+   - `project/config/project.yaml`
+6. Only after initialization is complete, provide your first project request.
+
+Note: users should not need to run command-line steps to initialize Operator.
+Initialization should be fully handled by the IDE agent thread.
 
 ## Core Ideas
 
@@ -47,6 +42,7 @@ Run commands from repository root:
 
 ```bash
 python -m runner.orchestrator init
+python -m runner.orchestrator bootstrap-operator --print-packet
 python -m runner.orchestrator validate
 python -m runner.orchestrator run --request "your request"
 python -m runner.orchestrator step

@@ -14,3 +14,9 @@
 3. If any required context file is missing, execution halts immediately.
 4. Context switches must be logged to role run journals and orchestration state.
 
+## Preconditions Before First Invocation
+
+1. Operator must run the project initialization gate before creating an
+   `operator_plan`.
+2. If required project context fields are empty or placeholder values, halt.
+3. If mandatory config values are not project-specific, halt.

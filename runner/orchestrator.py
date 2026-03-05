@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -14,6 +15,15 @@ from .adapters import AdapterError, build_adapter
 
 
 DEFAULT_STATUSES = ["Todo", "In Progress", "Blocked", "In Validation", "Done"]
+INITIALIZATION_REQUIRED_CONTEXT_FIELDS = (
+    "Project goals",
+    "Target users",
+    "Key constraints",
+    "Primary deliverables",
+    "Acceptance criteria",
+)
+UNSET_VALUE_MARKERS = {"", "tbd", "todo", "n/a", "na", "unknown"}
+DEFAULT_OPERATOR_BOOTSTRAP_PACKET = "project/state/operator-bootstrap.md"
 
 ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
     "operator": {
@@ -599,6 +609,149 @@ def _runtime(root: Path) -> dict[str, Any]:
     }
 
 
+def _is_value_defined(raw_value: str) -> bool:
+    normalized = (raw_value or "").strip().lower()
+    return normalized not in UNSET_VALUE_MARKERS
+
+
+def _extract_project_context_value(context_text: str, field_label: str) -> str:
+    pattern = rf"^- {re.escape(field_label)}:[ \t]*(.*)$"
+    match = re.search(pattern, context_text, flags=re.MULTILINE)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def _project_initialization_issues(root: Path, runtime: dict[str, Any]) -> list[str]:
+    issues: list[str] = []
+
+    config = runtime["config"]
+    project = config.get("project", {})
+    project_id = str(project.get("id", "")).strip()
+    project_name = str(project.get("name", "")).strip()
+    if not _is_value_defined(project_id) or project_id == "sample-project":
+        issues.append("project/config/project.yaml: set project.id to a real project identifier.")
+    if not _is_value_defined(project_name) or project_name.lower() == "sample project":
+        issues.append("project/config/project.yaml: set project.name to the real project name.")
+
+    host = config.get("host", {})
+    adapter_command = str(host.get("adapter_command", "")).strip()
+    if not _is_value_defined(adapter_command) or "REPLACE_WITH_LOCAL_ASSISTANT_COMMAND" in adapter_command:
+        issues.append(
+            "project/config/project.yaml: set host.adapter_command to a working local command."
+        )
+
+    roles = config.get("roles", {})
+    enabled_roles = roles.get("enabled", [])
+    if not isinstance(enabled_roles, list) or not enabled_roles:
+        issues.append("project/config/project.yaml: roles.enabled must include at least one role.")
+
+    context_path = root / "project" / "context" / "project-context.md"
+    if not context_path.exists():
+        issues.append("project/context/project-context.md is missing.")
+        return issues
+
+    context_text = context_path.read_text(encoding="utf-8")
+    for field_label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS:
+        value = _extract_project_context_value(context_text, field_label)
+        if not _is_value_defined(value):
+            issues.append(
+                "project/context/project-context.md: "
+                f"fill '{field_label}' with project-specific content."
+            )
+
+    return issues
+
+
+def _operator_bootstrap_packet(
+    root: Path,
+    config: dict[str, Any],
+    init_issues: list[str],
+    manifest_paths: list[str],
+) -> str:
+    project = config.get("project", {})
+    host = config.get("host", {})
+    roles = config.get("roles", {})
+    lines: list[str] = []
+    lines.append("# Operator Bootstrap Packet")
+    lines.append("")
+    lines.append(f"- Project ID: `{project.get('id', '')}`")
+    lines.append(f"- Project Name: `{project.get('name', '')}`")
+    lines.append(f"- Primary Adapter: `{host.get('primary_adapter', '')}`")
+    lines.append("")
+    lines.append("## Mandatory Context Load Order")
+    lines.append("")
+    for path in manifest_paths:
+        lines.append(f"1. `{path}`")
+    lines.append("")
+    lines.append("## Initialization Gate Status")
+    lines.append("")
+    if init_issues:
+        lines.append("Status: `BLOCKED`")
+        lines.append("")
+        lines.append("Complete these items before invoking any non-Operator role:")
+        lines.append("")
+        for issue in init_issues:
+            lines.append(f"- {issue}")
+    else:
+        lines.append("Status: `READY`")
+        lines.append("")
+        lines.append("Project context and mandatory config are complete.")
+    lines.append("")
+    lines.append("## Operator Procedure")
+    lines.append("")
+    lines.append("1. Load mandatory context in the order above.")
+    lines.append("2. If gate is blocked, ask targeted questions and update:")
+    lines.append("   - `project/context/project-context.md`")
+    lines.append("   - `project/config/project.yaml`")
+    lines.append("3. Do not invoke work agents until gate is `READY`.")
+    lines.append("4. Once ready, collect user request and produce `operator_plan` JSON only.")
+    lines.append("")
+    lines.append("## Enabled Roles")
+    lines.append("")
+    enabled_roles = roles.get("enabled", [])
+    if isinstance(enabled_roles, list) and enabled_roles:
+        for role_id in enabled_roles:
+            lines.append(f"- `{role_id}`")
+    else:
+        lines.append("- None")
+    lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def cmd_bootstrap_operator(args: argparse.Namespace) -> int:
+    root = repo_root()
+    errors = validators.validate_framework(root)
+    if errors:
+        print("Validation failed:")
+        for error in errors:
+            print(f"- {error}")
+        return 1
+
+    config = validators.load_project_config(root)
+    init_issues = _project_initialization_issues(root, {"config": config})
+    manifest = context_loader.build_manifest(root, "operator")
+    manifest_paths = context_loader.manifest_paths(manifest)
+
+    packet = _operator_bootstrap_packet(root, config, init_issues, manifest_paths)
+    output_path = root / args.output
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(packet, encoding="utf-8")
+
+    print(f"Operator bootstrap packet written to: {output_path.as_posix()}")
+    if init_issues:
+        print(f"Initialization gate: BLOCKED ({len(init_issues)} item(s))")
+    else:
+        print("Initialization gate: READY")
+    print("Recommended short prompt:")
+    print("Initialize this thread as AgentSquad Operator")
+
+    if args.print_packet:
+        print("")
+        print(packet)
+    return 0
+
+
 def _upsert_backlog_from_operator(root: Path, plan_payload: dict[str, Any]) -> list[dict[str, Any]]:
     backlog_path = root / "backlog.md"
     existing = backlog_store.read_backlog(backlog_path)
@@ -909,7 +1062,16 @@ def _prepare_runtime_or_exit(root: Path) -> dict[str, Any]:
     if errors:
         joined = "\n".join(f"- {item}" for item in errors)
         raise OrchestrationHalt(f"Validation failed before execution:\n{joined}")
-    return _runtime(root)
+    runtime = _runtime(root)
+    init_issues = _project_initialization_issues(root, runtime)
+    if init_issues:
+        joined = "\n".join(f"- {item}" for item in init_issues)
+        raise OrchestrationHalt(
+            "Project initialization is incomplete. Operator cannot invoke agent work yet.\n"
+            "Complete required project context/config first:\n"
+            f"{joined}"
+        )
+    return runtime
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -986,6 +1148,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     init_parser = sub.add_parser("init", help="Create missing scaffold files.")
     init_parser.set_defaults(func=cmd_init)
+
+    bootstrap_parser = sub.add_parser(
+        "bootstrap-operator",
+        help="Generate Operator bootstrap packet for short-prompt initialization.",
+    )
+    bootstrap_parser.add_argument(
+        "--output",
+        default=DEFAULT_OPERATOR_BOOTSTRAP_PACKET,
+        help="Output markdown packet path relative to repository root.",
+    )
+    bootstrap_parser.add_argument(
+        "--print-packet",
+        action="store_true",
+        help="Print generated bootstrap packet to stdout.",
+    )
+    bootstrap_parser.set_defaults(func=cmd_bootstrap_operator)
 
     validate_parser = sub.add_parser("validate", help="Validate framework integrity.")
     validate_parser.set_defaults(func=cmd_validate)

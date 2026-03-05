@@ -12,4 +12,16 @@ Define universal behavior for all roles in this framework.
 4. Use operator-mediated handoff for cross-role blocking and feedback.
 5. Halt execution when required context cannot be loaded.
 6. Do not bypass validation for contract shape or status transitions.
+7. Do not begin agent task execution until project initialization is complete.
 
+## Project Initialization Gate
+
+Before any agent work can start, Operator must confirm:
+
+1. `project/context/project-context.md` has concrete values for:
+   `Project goals`, `Target users`, `Key constraints`, `Primary deliverables`,
+   and `Acceptance criteria`.
+2. `project/config/project.yaml` has project-specific values for `project.id`
+   and `project.name`.
+3. `host.adapter_command` is configured to a working local command.
+4. At least one role is enabled in `roles.enabled`.
