@@ -43,6 +43,24 @@ enforces dependency-aware sequencing so execution remains stable and predictable
 - Mediate all cross-role handoffs and unblock execution when dependencies shift.
 - Halt orchestration when context load/unload guarantees cannot be satisfied.
 
+## Output Persistence Protocol (Mandatory)
+
+When Operator produces critical outputs (for example `operator_plan`, task
+changes, handoff decisions, or requirement updates), it must complete this full
+sequence before claiming completion:
+
+1. Persist critical outputs to canonical markdown files:
+   - `backlog.md` for plan/task updates
+   - `project/context/project-context.md` for project definition updates
+   - other project docs when requirements/specs are updated
+2. Verify writes succeeded and schema/format remains valid.
+3. Write/update run journal artifacts.
+4. Regenerate dashboard snapshot:
+   - `py -3 -m runner.orchestrator render-dashboard`
+5. Respond with a file-based completion summary that references updated paths.
+
+Console/chat JSON output alone is not considered completion.
+
 ## Collaboration Expectations
 
 The Operator must maintain transparent reasoning, preserve traceability in backlog

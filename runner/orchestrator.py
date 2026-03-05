@@ -881,12 +881,18 @@ def cmd_bootstrap_operator(args: argparse.Namespace) -> int:
     return 0
 
 
-def _upsert_backlog_from_operator(root: Path, plan_payload: dict[str, Any]) -> list[dict[str, Any]]:
+def _upsert_backlog_from_operator(
+    root: Path, plan_payload: dict[str, Any]
+) -> tuple[list[dict[str, Any]], bool]:
     backlog_path = root / "backlog.md"
     existing = backlog_store.read_backlog(backlog_path)
+    before_render = backlog_store.render_backlog(existing)
     updated = backlog_store.upsert_tasks(existing, plan_payload["tasks"])
-    backlog_store.write_backlog(backlog_path, updated)
-    return updated
+    after_render = backlog_store.render_backlog(updated)
+    changed = after_render != before_render
+    if changed:
+        backlog_store.write_backlog(backlog_path, updated)
+    return updated, changed
 
 
 def _invoke_operator(
@@ -942,7 +948,12 @@ def _invoke_operator(
         session_plan=session_plan,
     )
 
-    updated_tasks = _upsert_backlog_from_operator(root, parsed)
+    updated_tasks, backlog_changed = _upsert_backlog_from_operator(root, parsed)
+    if not backlog_changed:
+        raise OrchestrationHalt(
+            "Operator plan rejected: backlog.md was not modified. "
+            "Operator must return an operator_plan that creates or updates at least one backlog task."
+        )
     backlog_after = backlog_store.render_backlog(updated_tasks)
     state["role_sequence"] = parsed["initial_role_sequence"]
     state["history"].append(
