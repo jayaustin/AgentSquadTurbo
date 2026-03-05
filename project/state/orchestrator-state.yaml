@@ -6,5 +6,5 @@ last_completed_task_id: ""
 current_request: ""
 halted: false
 halt_reason: ""
+role_sessions: {}
 history: []
-

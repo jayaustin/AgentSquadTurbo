@@ -3,7 +3,12 @@ project:
   name: Sample Project
 host:
   primary_adapter: codex
-  adapter_command: REPLACE_WITH_LOCAL_ASSISTANT_COMMAND
+  adapter_command: codex
+  session_mode: per-role-threads
+  context_rot_guardrails:
+    max_turns_per_role_session: 8
+    max_session_age_minutes: 240
+    force_reload_on_context_change: true
 roles:
   enabled:
     - operator
@@ -29,4 +34,3 @@ backlog:
     - Blocked
     - In Validation
     - Done
-

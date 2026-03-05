@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -65,3 +66,15 @@ def compose_context_text(manifest: list[ContextEntry]) -> str:
         sections.append(f"### END {entry.kind}: {entry.path.as_posix()}")
     return "\n\n".join(sections) + "\n"
 
+
+def manifest_hash(manifest: list[ContextEntry]) -> str:
+    """Stable hash for loaded context contents and order."""
+    hasher = hashlib.sha256()
+    for entry in manifest:
+        hasher.update(entry.kind.encode("utf-8"))
+        hasher.update(b"\n")
+        hasher.update(entry.path.as_posix().encode("utf-8"))
+        hasher.update(b"\n")
+        hasher.update(entry.content.encode("utf-8"))
+        hasher.update(b"\n")
+    return hasher.hexdigest()

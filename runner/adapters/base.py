@@ -20,6 +20,14 @@ class AdapterInvocation:
     prompt: str
 
 
+@dataclass(frozen=True)
+class InvocationResult:
+    """Normalized response payload from host invocation."""
+
+    output: str
+    session_id: str | None = None
+
+
 class BaseAdapter:
     """Base adapter that invokes a local assistant command."""
 
@@ -53,3 +61,12 @@ class BaseAdapter:
             raise AdapterError(f"{self.adapter_id} invocation returned empty output.")
         return output
 
+    def invoke_with_session(
+        self,
+        command: str,
+        prompt: str,
+        session_id: str | None = None,
+    ) -> InvocationResult:
+        """Invoke adapter with optional session continuity."""
+        output = self.invoke(command=command, prompt=prompt)
+        return InvocationResult(output=output, session_id=session_id)

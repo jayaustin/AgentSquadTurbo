@@ -189,6 +189,7 @@ def _default_state() -> dict[str, Any]:
         "current_request": "",
         "halted": False,
         "halt_reason": "",
+        "role_sessions": {},
         "history": [],
     }
 
@@ -241,7 +242,13 @@ def _project_config_seed() -> dict[str, Any]:
         "project": {"id": "sample-project", "name": "Sample Project"},
         "host": {
             "primary_adapter": "codex",
-            "adapter_command": "REPLACE_WITH_LOCAL_ASSISTANT_COMMAND",
+            "adapter_command": "codex",
+            "session_mode": "per-role-threads",
+            "context_rot_guardrails": {
+                "max_turns_per_role_session": 8,
+                "max_session_age_minutes": 240,
+                "force_reload_on_context_change": True,
+            },
         },
         "roles": {"enabled": list(ROLE_DEFINITIONS.keys()), "disabled": []},
         "execution": {
@@ -338,6 +345,8 @@ def load_state(root: Path) -> dict[str, Any]:
         state["context_manifest"] = []
     if not isinstance(state.get("role_sequence"), list):
         state["role_sequence"] = []
+    if not isinstance(state.get("role_sessions"), dict):
+        state["role_sessions"] = {}
     if not isinstance(state.get("history"), list):
         state["history"] = []
     return state
@@ -365,6 +374,118 @@ def _load_template(root: Path, file_name: str) -> str:
     return (root / "runner" / "templates" / file_name).read_text(encoding="utf-8")
 
 
+def _parse_utc(value: str | None) -> datetime | None:
+    if not value:
+        return None
+    raw = value.strip()
+    if not raw:
+        return None
+    try:
+        if raw.endswith("Z"):
+            raw = raw[:-1] + "+00:00"
+        parsed = datetime.fromisoformat(raw)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed.astimezone(timezone.utc)
+    except ValueError:
+        return None
+
+
+def _session_guardrails(runtime: dict[str, Any]) -> dict[str, Any]:
+    defaults = {
+        "max_turns_per_role_session": 8,
+        "max_session_age_minutes": 240,
+        "force_reload_on_context_change": True,
+    }
+    configured = runtime.get("context_rot_guardrails", {})
+    if not isinstance(configured, dict):
+        configured = {}
+    merged = dict(defaults)
+    merged.update(configured)
+    return merged
+
+
+def _resolve_role_session_plan(
+    runtime: dict[str, Any],
+    state: dict[str, Any],
+    role_id: str,
+    context_hash: str,
+) -> dict[str, Any]:
+    mode = runtime.get("session_mode", "per-role-threads")
+    if mode != "per-role-threads":
+        return {
+            "mode": mode,
+            "reuse": False,
+            "session_id": None,
+            "refresh_reasons": ["stateless-mode"],
+            "full_context_required": True,
+        }
+
+    role_sessions = state.setdefault("role_sessions", {})
+    session_record = role_sessions.get(role_id, {})
+    session_id = str(session_record.get("session_id", "")).strip()
+    if not session_id:
+        return {
+            "mode": mode,
+            "reuse": False,
+            "session_id": None,
+            "refresh_reasons": ["missing-session"],
+            "full_context_required": True,
+        }
+
+    guardrails = _session_guardrails(runtime)
+    reasons: list[str] = []
+    if bool(guardrails.get("force_reload_on_context_change", True)):
+        previous_hash = str(session_record.get("context_hash", "")).strip()
+        if previous_hash and previous_hash != context_hash:
+            reasons.append("context-changed")
+
+    max_turns = int(guardrails.get("max_turns_per_role_session", 8))
+    turn_count = int(session_record.get("turn_count", 0) or 0)
+    if max_turns > 0 and turn_count >= max_turns:
+        reasons.append("max-turns-reached")
+
+    max_age_minutes = int(guardrails.get("max_session_age_minutes", 240))
+    created_at = _parse_utc(str(session_record.get("created_at", "")))
+    if max_age_minutes > 0 and created_at is not None:
+        age_minutes = (datetime.now(timezone.utc) - created_at).total_seconds() / 60.0
+        if age_minutes >= max_age_minutes:
+            reasons.append("max-age-reached")
+
+    reuse = not reasons
+    return {
+        "mode": mode,
+        "reuse": reuse,
+        "session_id": session_id if reuse else None,
+        "refresh_reasons": reasons if reasons else ["session-reuse"],
+        "full_context_required": not reuse,
+    }
+
+
+def _persist_role_session(
+    state: dict[str, Any],
+    role_id: str,
+    session_id: str | None,
+    context_hash: str,
+    reused_existing: bool,
+) -> None:
+    if not session_id:
+        return
+    role_sessions = state.setdefault("role_sessions", {})
+    previous = role_sessions.get(role_id, {})
+    now = utc_now()
+    previous_turns = int(previous.get("turn_count", 0) or 0)
+    created_at = previous.get("created_at") if reused_existing else now
+    turn_count = previous_turns + 1 if reused_existing else 1
+    role_sessions[role_id] = {
+        "session_id": session_id,
+        "created_at": created_at,
+        "last_used_at": now,
+        "turn_count": turn_count,
+        "context_hash": context_hash,
+    }
+
+
 def _load_role_context(root: Path, state: dict[str, Any], role_id: str) -> list[context_loader.ContextEntry]:
     active_role = state.get("active_role")
     manifest = state.get("context_manifest", [])
@@ -387,30 +508,63 @@ def _load_role_context(root: Path, state: dict[str, Any], role_id: str) -> list[
 
 
 def _invoke_with_retry(
-    adapter,
-    command: str,
+    runtime: dict[str, Any],
+    state: dict[str, Any],
+    role_id: str,
     prompt: str,
     contract_type: str,
     statuses: list[str],
     known_roles: set[str],
-) -> tuple[dict[str, Any], str]:
+    context_hash: str,
+    session_plan: dict[str, Any],
+) -> tuple[dict[str, Any], str, list[str]]:
     strict_suffix = (
         "\n\nSTRICT RETRY: return exactly one JSON object with no markdown, no prose, "
         "and no trailing text."
     )
     last_exc: Exception | None = None
     last_raw = ""
+    adapter = runtime["adapter"]
+    command = runtime["adapter_command"]
+    session_id = session_plan.get("session_id")
+    refresh_reasons = list(session_plan.get("refresh_reasons", []))
+    reused_existing = bool(session_plan.get("reuse", False))
+
     for attempt in (1, 2):
         candidate_prompt = prompt if attempt == 1 else prompt + strict_suffix
-        raw = adapter.invoke(command, candidate_prompt)
+        result = adapter.invoke_with_session(
+            command=command,
+            prompt=candidate_prompt,
+            session_id=session_id,
+        )
+        raw = result.output
         last_raw = raw
+        if result.session_id:
+            session_id = result.session_id
         try:
             payload = contracts.parse_json_payload(raw)
             if contract_type == "operator_plan":
-                return contracts.validate_operator_plan(payload, statuses, known_roles), raw
-            if contract_type == "agent_result":
-                return contracts.validate_agent_result(payload, statuses, known_roles), raw
-            raise ValueError(f"Unknown contract_type '{contract_type}'.")
+                parsed = contracts.validate_operator_plan(payload, statuses, known_roles)
+            elif contract_type == "agent_result":
+                parsed = contracts.validate_agent_result(payload, statuses, known_roles)
+            else:
+                raise ValueError(f"Unknown contract_type '{contract_type}'.")
+            if runtime.get("session_mode") == "per-role-threads":
+                _persist_role_session(
+                    state=state,
+                    role_id=role_id,
+                    session_id=session_id,
+                    context_hash=context_hash,
+                    reused_existing=reused_existing,
+                )
+            session_events = []
+            if runtime.get("session_mode") == "per-role-threads":
+                if session_id:
+                    session_events.append(f"session_id={session_id}")
+                session_events.extend([f"session_policy={reason}" for reason in refresh_reasons])
+            else:
+                session_events.append("session_policy=stateless-mode")
+            return parsed, raw, session_events
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
     raise OrchestrationHalt(
@@ -428,6 +582,8 @@ def _runtime(root: Path) -> dict[str, Any]:
     statuses = list(config["backlog"]["statuses"])
     adapter_name = str(config["host"]["primary_adapter"])
     adapter_command = str(config["host"]["adapter_command"])
+    session_mode = str(config["host"].get("session_mode", "per-role-threads"))
+    context_rot_guardrails = config["host"].get("context_rot_guardrails", {})
     adapter = build_adapter(adapter_name)
     return {
         "config": config,
@@ -438,6 +594,8 @@ def _runtime(root: Path) -> dict[str, Any]:
         "statuses": statuses,
         "adapter": adapter,
         "adapter_command": adapter_command,
+        "session_mode": session_mode,
+        "context_rot_guardrails": context_rot_guardrails,
     }
 
 
@@ -461,7 +619,20 @@ def _invoke_operator(
     backlog_before = backlog_store.render_backlog(current_tasks)
 
     manifest = _load_role_context(root, state, "operator")
-    context_text = context_loader.compose_context_text(manifest)
+    context_hash = context_loader.manifest_hash(manifest)
+    session_plan = _resolve_role_session_plan(
+        runtime=runtime,
+        state=state,
+        role_id="operator",
+        context_hash=context_hash,
+    )
+    if session_plan["full_context_required"]:
+        context_text = context_loader.compose_context_text(manifest)
+    else:
+        context_text = (
+            "Reuse existing operator thread context. "
+            "Load context files again only if inconsistency is detected."
+        )
     manifest_text = "\n".join(f"- {path}" for path in context_loader.manifest_paths(manifest))
     template = _load_template(root, "operator-plan-prompt.md")
     contracts_doc = _load_template(root, "json-contracts.md")
@@ -477,13 +648,16 @@ def _invoke_operator(
         },
     )
 
-    parsed, raw_output = _invoke_with_retry(
-        runtime["adapter"],
-        runtime["adapter_command"],
-        prompt,
-        "operator_plan",
-        runtime["statuses"],
-        runtime["known_roles"],
+    parsed, raw_output, session_events = _invoke_with_retry(
+        runtime=runtime,
+        state=state,
+        role_id="operator",
+        prompt=prompt,
+        contract_type="operator_plan",
+        statuses=runtime["statuses"],
+        known_roles=runtime["known_roles"],
+        context_hash=context_hash,
+        session_plan=session_plan,
     )
 
     updated_tasks = _upsert_backlog_from_operator(root, parsed)
@@ -507,7 +681,7 @@ def _invoke_operator(
         parsed_result=parsed,
         backlog_before=backlog_before,
         backlog_after=backlog_after,
-        events=[f"mode={mode_label}", "operator_plan parsed"],
+        events=[f"mode={mode_label}", "operator_plan parsed"] + session_events,
     )
     return updated_tasks
 
@@ -612,7 +786,20 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
         backlog_store.write_backlog(backlog_path, tasks)
 
     manifest = _load_role_context(root, state, owner)
-    context_text = context_loader.compose_context_text(manifest)
+    context_hash = context_loader.manifest_hash(manifest)
+    session_plan = _resolve_role_session_plan(
+        runtime=runtime,
+        state=state,
+        role_id=owner,
+        context_hash=context_hash,
+    )
+    if session_plan["full_context_required"]:
+        context_text = context_loader.compose_context_text(manifest)
+    else:
+        context_text = (
+            "Reuse existing role thread context. "
+            "Reload full role context only when guardrails trigger refresh."
+        )
     manifest_text = "\n".join(f"- {path}" for path in context_loader.manifest_paths(manifest))
     template = _load_template(root, "agent-task-prompt.md")
     contracts_doc = _load_template(root, "json-contracts.md")
@@ -627,13 +814,16 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
         },
     )
 
-    parsed, raw_output = _invoke_with_retry(
-        runtime["adapter"],
-        runtime["adapter_command"],
-        prompt,
-        "agent_result",
-        runtime["statuses"],
-        runtime["known_roles"],
+    parsed, raw_output, session_events = _invoke_with_retry(
+        runtime=runtime,
+        state=state,
+        role_id=owner,
+        prompt=prompt,
+        contract_type="agent_result",
+        statuses=runtime["statuses"],
+        known_roles=runtime["known_roles"],
+        context_hash=context_hash,
+        session_plan=session_plan,
     )
 
     updated_tasks = _apply_agent_result(tasks, parsed, runtime["statuses"], runtime["known_roles"])
@@ -652,6 +842,7 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
     events = [f"task={task_id}", f"owner={owner}", f"status={parsed['status']}"]
     if parsed.get("handoff_request"):
         events.append("handoff mediated by operator")
+    events.extend(session_events)
     logging_store.write_run_journal(
         root=root,
         role_id=owner,

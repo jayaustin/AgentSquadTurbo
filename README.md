@@ -66,6 +66,22 @@ The runner passes prompt data through:
 - `STDIN`
 - `AGENTSQUAD_PROMPT` environment variable
 
+## Threaded Role Sessions
+
+AgentSquad supports persistent per-role Codex threads so Operator does not need
+to repeatedly rebuild role context every turn.
+
+Configure in `project/config/project.yaml`:
+
+- `host.session_mode`: `per-role-threads` or `stateless`
+- `host.context_rot_guardrails.max_turns_per_role_session`
+- `host.context_rot_guardrails.max_session_age_minutes`
+- `host.context_rot_guardrails.force_reload_on_context_change`
+
+When `per-role-threads` is enabled, the runner tracks role session IDs in
+`project/state/orchestrator-state.yaml` and automatically refreshes sessions
+when guardrails trigger (turn count, age, or context hash change).
+
 ## Validation Guarantees
 
 - Role files exist for every enabled role.

@@ -262,6 +262,27 @@ def _validate_project_config(config: dict[str, Any]) -> list[str]:
     if execution.get("selection_policy") != "dependency-fifo":
         errors.append("execution.selection_policy must be 'dependency-fifo'.")
 
+    session_mode = host.get("session_mode", "per-role-threads")
+    if session_mode not in {"per-role-threads", "stateless"}:
+        errors.append("host.session_mode must be 'per-role-threads' or 'stateless'.")
+
+    guardrails = host.get("context_rot_guardrails", {})
+    if guardrails is not None and not isinstance(guardrails, dict):
+        errors.append("host.context_rot_guardrails must be an object if provided.")
+        guardrails = {}
+    if isinstance(guardrails, dict):
+        max_turns = guardrails.get("max_turns_per_role_session", 8)
+        max_age = guardrails.get("max_session_age_minutes", 240)
+        reload_on_change = guardrails.get("force_reload_on_context_change", True)
+        if not isinstance(max_turns, int) or max_turns <= 0:
+            errors.append("host.context_rot_guardrails.max_turns_per_role_session must be > 0.")
+        if not isinstance(max_age, int) or max_age <= 0:
+            errors.append("host.context_rot_guardrails.max_session_age_minutes must be > 0.")
+        if not isinstance(reload_on_change, bool):
+            errors.append(
+                "host.context_rot_guardrails.force_reload_on_context_change must be boolean."
+            )
+
     statuses = backlog.get("statuses", [])
     expected_statuses = ["Todo", "In Progress", "Blocked", "In Validation", "Done"]
     if statuses != expected_statuses:
