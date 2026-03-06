@@ -1,0 +1,120 @@
+# OS files
+.DS_Store
+.DS_Store?
+Thumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+.Spotlight-V100/
+.Trashes/
+._*
+
+# Editor and IDE files
+.vscode/
+.idea/
+*.iml
+*.suo
+*.user
+*.userossc
+*.rsuser
+*.sln.docstates
+*.swp
+*.swo
+*~
+
+# Python cache and bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Python tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.hypothesis/
+.tox/
+.nox/
+.ipynb_checkpoints/
+
+# Python virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Python coverage and test outputs
+.coverage
+.coverage.*
+htmlcov/
+.cache/
+coverage/
+*.cover
+*.py,cover
+
+# Python build and packaging artifacts
+build/
+dist/
+site/
+.eggs/
+*.egg
+*.egg-info/
+pip-wheel-metadata/
+wheelhouse/
+
+# Node and frontend artifacts
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+.pnpm-store/
+.npm/
+
+# Compiled objects and binaries
+*.o
+*.obj
+*.a
+*.lib
+*.so
+*.dylib
+*.dll
+*.exe
+*.class
+*.jar
+*.war
+*.nar
+
+# Logs and runtime files
+*.log
+*.out
+*.err
+*.pid
+*.pid.lock
+*.seed
+debug.log
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+!.env.template
+*.local
+*.secret
+*.secrets
+*.key
+*.pem
+
+# Temp files and directories
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Archives
+*.7z
+*.gz
+*.zip
+*.tar
+*.tgz
+*.bz2
+*.rar
