@@ -49,7 +49,13 @@ Read AGENTS.md and initialize this thread as AgentSquad Operator
 6. Answer Operator initialization intake so it can update:
    - `project/context/project-context.md`
    - `project/config/project.yaml`
-7. After initialization reaches `READY`, provide your first project request.
+   - Optional but recommended: complete the deep-dive intake follow-up to provide
+     richer detail on goals, users, constraints, deliverables, and acceptance criteria.
+7. Complete Operator role enablement review:
+   - Operator proposes roles to disable (all roles are enabled by default)
+   - You confirm one of: `apply-recommendations`, `keep-all`, or `custom`
+   - Operator records confirmation in `project/config/project.yaml` (`roles.review_confirmed: true`)
+8. After initialization reaches `READY`, provide your first project request.
 
 Note: in an ideal environment, users should not manually run bootstrap CLI
 steps. Initialization should be handled by the IDE agent thread.
@@ -172,6 +178,7 @@ Runtime contract and execution safeguards include:
 - strict context load order enforcement
 - one retry for invalid JSON, then halt with reason
 - initialization gate must pass before work execution
+- role review confirmation is required before initialization can become `READY`
 - task ownership forbids `owner: operator`
 - `operator_plan` must actually modify `backlog.md` or is rejected
 - operator-mediated reassignment for invalid/disabled ownership conditions

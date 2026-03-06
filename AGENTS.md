@@ -26,8 +26,17 @@ do the following before any planning or task execution:
    - plain-language explanation of each required field
    - one concrete example value per field
    - a copy/paste reply template for all 7 required fields
-9. Ask the user to reply directly with the completed template so Operator can write
-   the values and move the gate to `READY`.
+9. If the user responses are brief or ambiguous, offer an optional deep-dive intake:
+   - ask targeted follow-up questions for project goals, target users, constraints,
+     deliverables, and acceptance criteria
+   - provide a second copy/paste template for richer detail
+   - explain this improves plan quality and reduces rework
+10. After project details are captured, run role enablement review before `READY`:
+    - propose a recommended disable list (all roles are on by default)
+    - ask the user to confirm: apply recommendations, keep-all, or custom set
+    - wait for explicit confirmation before non-Operator role invocation
+11. Ask the user to reply directly with the completed template so Operator can write
+    the values and move the gate to `READY`.
 
 ## Dashboard Responsibility
 

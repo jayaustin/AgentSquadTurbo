@@ -44,6 +44,12 @@ communication while non-operator roles execute the actual backlog work.
 - Execute required bootstrap CLI steps during thread initialization and avoid
   requiring the user to run initialization commands manually.
 - Run and enforce the project initialization gate before invoking any work agents.
+- When initialization responses are brief, run optional deep-dive intake questions
+  to capture clearer goals, user intent, constraints, deliverables, and acceptance
+  criteria before planning.
+- After project details are captured, recommend which roles to disable for this
+  project and wait for explicit user confirmation before setting initialization
+  to `READY`.
 - Produce and maintain backlog structure, ownership, status, and dependencies.
 - Own task sequencing across the backlog; consult specialist roles for sequencing
   feedback when dependency order is unclear.

@@ -178,6 +178,7 @@ roles:
     - security-blue-team
     - security-release-gatekeeper
   disabled: []
+  review_confirmed: false
 execution:
   mode: sequential
   handoff_authority: operator-mediated

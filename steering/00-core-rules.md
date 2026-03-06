@@ -48,6 +48,14 @@ Before any agent work can start, Operator must confirm:
    and `project.name`.
 3. `host.adapter_command` is configured to a working local command.
 4. At least one role is enabled in `roles.enabled`.
+5. If initialization answers are present but too brief/ambiguous, Operator should
+   run optional deep-dive intake questions before planning to reduce avoidable
+   backlog churn and rework.
+6. Operator must perform role enablement review and obtain explicit user
+   confirmation before initialization is `READY`:
+   - all roles start enabled by default
+   - Operator should recommend which roles to disable
+   - `roles.review_confirmed` must be set to `true` after confirmation
 
 ## Persistence Requirement
 

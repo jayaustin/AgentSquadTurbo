@@ -59,6 +59,91 @@ INITIALIZATION_INTAKE_GUIDANCE: tuple[tuple[str, str, str], ...] = (
         "All P1 tasks Done, QA sign-off complete, localization covers EN/ES/FR, docs approved.",
     ),
 )
+INITIALIZATION_DETAIL_MIN_WORDS = 8
+INITIALIZATION_DETAIL_MIN_CHARS = 48
+INITIALIZATION_DEEP_DIVE_QUESTIONS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    (
+        "Project goals",
+        (
+            "Which measurable outcomes matter most (for example conversion, retention, revenue, quality), and what target values define success?",
+            "What is the target timeline or milestone window for those outcomes?",
+        ),
+    ),
+    (
+        "Target users",
+        (
+            "Who is the primary audience segment, and what critical problem are they trying to solve?",
+            "What user segments are explicitly out of scope for v1?",
+        ),
+    ),
+    (
+        "Key constraints",
+        (
+            "List hard constraints (time, budget, policy, compliance, integrations, tech stack) that must not be violated.",
+            "Which tradeoffs are acceptable if conflicts occur between scope, quality, and timeline?",
+        ),
+    ),
+    (
+        "Primary deliverables",
+        (
+            "List the required artifacts and outputs (specs, code, tests, dashboards, launch assets) expected for v1.",
+            "Which deliverables are mandatory for sign-off versus optional stretch outputs?",
+        ),
+    ),
+    (
+        "Acceptance criteria",
+        (
+            "What objective checks prove completion (for example tests passing, metric thresholds, stakeholder approvals)?",
+            "Who approves completion and what evidence must be provided?",
+        ),
+    ),
+)
+ROLE_REVIEW_CONFIRMATION_KEY = "review_confirmed"
+ROLE_REVIEW_PENDING_ISSUE = (
+    "project/config/project.yaml: roles.review_confirmed must be true after Operator "
+    "presents role enable/disable recommendations and receives explicit user confirmation."
+)
+ROLE_REVIEW_DISABLE_DISPLAY_LIMIT = 30
+ROLE_REVIEW_KEEP_DISPLAY_LIMIT = 12
+ROLE_REVIEW_CORE_KEEP = {"operator", "product-manager", "technical-architect", "qa-manager"}
+ROLE_REVIEW_TOKEN_STOPWORDS = {
+    "the",
+    "and",
+    "for",
+    "with",
+    "that",
+    "this",
+    "from",
+    "into",
+    "your",
+    "their",
+    "about",
+    "must",
+    "should",
+    "will",
+    "have",
+    "need",
+    "needs",
+    "work",
+    "works",
+    "project",
+    "role",
+    "roles",
+    "agent",
+    "agents",
+    "team",
+    "user",
+    "users",
+    "using",
+    "based",
+    "across",
+    "through",
+    "while",
+    "before",
+    "after",
+    "into",
+    "only",
+}
 UNSET_VALUE_MARKERS = {"", "tbd", "todo", "n/a", "na", "unknown"}
 DEFAULT_OPERATOR_BOOTSTRAP_PACKET = "project/state/operator-bootstrap.md"
 
@@ -283,7 +368,11 @@ def _project_config_seed(role_definitions: dict[str, dict[str, Any]]) -> dict[st
                 "force_reload_on_context_change": True,
             },
         },
-        "roles": {"enabled": list(role_definitions.keys()), "disabled": []},
+        "roles": {
+            "enabled": list(role_definitions.keys()),
+            "disabled": [],
+            ROLE_REVIEW_CONFIRMATION_KEY: False,
+        },
         "execution": {
             "mode": "sequential",
             "handoff_authority": "operator-mediated",
@@ -969,7 +1058,143 @@ def _extract_project_context_value(context_text: str, field_label: str) -> str:
     return match.group(1).strip()
 
 
-def _project_initialization_issues(root: Path, runtime: dict[str, Any]) -> list[str]:
+def _project_context_values(root: Path) -> dict[str, str]:
+    values = {label: "" for label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS}
+    context_path = root / "project" / "context" / "project-context.md"
+    if not context_path.exists():
+        return values
+    context_text = context_path.read_text(encoding="utf-8")
+    for label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS:
+        values[label] = _extract_project_context_value(context_text, label)
+    return values
+
+
+def _role_review_confirmed(config: dict[str, Any]) -> bool:
+    roles = config.get("roles", {})
+    if not isinstance(roles, dict):
+        return False
+    return bool(roles.get(ROLE_REVIEW_CONFIRMATION_KEY, False))
+
+
+def _role_review_project_tokens(root: Path, config: dict[str, Any]) -> set[str]:
+    project = config.get("project", {})
+    project_values = _project_context_values(root)
+    text_parts = [
+        str(project.get("id", "")),
+        str(project.get("name", "")),
+        *[project_values[label] for label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS],
+    ]
+    raw = " ".join(text_parts).lower()
+    tokens: set[str] = set()
+    for token in re.findall(r"[a-z0-9][a-z0-9\-]{1,}", raw):
+        normalized = token.strip("-")
+        if len(normalized) < 3:
+            continue
+        if normalized in ROLE_REVIEW_TOKEN_STOPWORDS:
+            continue
+        tokens.add(normalized)
+    return tokens
+
+
+def _role_review_role_tokens(
+    root: Path,
+    role_id: str,
+    role_meta: dict[str, Any],
+) -> set[str]:
+    role_file = str(role_meta.get("role_file", "")).strip()
+    role_path = root / role_file if role_file else None
+    frontmatter: dict[str, Any] = {}
+    if role_path and role_path.exists():
+        try:
+            frontmatter = validators.extract_frontmatter(role_path)
+        except Exception:  # noqa: BLE001
+            frontmatter = {}
+
+    text_parts: list[str] = [
+        role_id.replace("-", " "),
+        str(role_meta.get("display_name", "")),
+        str(frontmatter.get("display_name", "")),
+        str(frontmatter.get("mission", "")),
+    ]
+    for field_name in ("inputs", "outputs", "handoff_rules"):
+        value = frontmatter.get(field_name)
+        if isinstance(value, list):
+            text_parts.extend(str(item) for item in value)
+
+    raw = " ".join(text_parts).lower()
+    tokens: set[str] = set()
+    for token in re.findall(r"[a-z0-9][a-z0-9\-]{1,}", raw):
+        normalized = token.strip("-")
+        if len(normalized) < 3:
+            continue
+        if normalized in ROLE_REVIEW_TOKEN_STOPWORDS:
+            continue
+        tokens.add(normalized)
+    return tokens
+
+
+def _role_review_recommendations(
+    root: Path,
+    config: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    try:
+        registry_roles = validators.load_registry(root).get("roles", {})
+    except Exception:  # noqa: BLE001
+        registry_roles = {}
+
+    if not isinstance(registry_roles, dict):
+        registry_roles = {}
+
+    roles_cfg = config.get("roles", {})
+    enabled_roles = roles_cfg.get("enabled", [])
+    if not isinstance(enabled_roles, list):
+        enabled_roles = []
+
+    project_tokens = _role_review_project_tokens(root, config)
+    scored: list[dict[str, Any]] = []
+    for raw_role_id in enabled_roles:
+        role_id = str(raw_role_id).strip()
+        if not role_id:
+            continue
+        role_meta = registry_roles.get(role_id, {})
+        if not isinstance(role_meta, dict):
+            role_meta = {}
+        role_tokens = _role_review_role_tokens(root, role_id, role_meta)
+        overlap = sorted(project_tokens & role_tokens)
+        scored.append(
+            {
+                "role_id": role_id,
+                "score": len(overlap),
+                "overlap": overlap[:6],
+            }
+        )
+
+    if not scored:
+        return [], []
+
+    disable_candidates = [
+        item
+        for item in scored
+        if item["role_id"] not in ROLE_REVIEW_CORE_KEEP and item["score"] == 0
+    ]
+    disable_candidates.sort(key=lambda item: item["role_id"])
+
+    if not disable_candidates:
+        low_overlap = [
+            item
+            for item in sorted(scored, key=lambda item: (item["score"], item["role_id"]))
+            if item["role_id"] not in ROLE_REVIEW_CORE_KEEP and item["score"] <= 1
+        ]
+        limit = min(8, max(3, len(low_overlap) // 4))
+        disable_candidates = low_overlap[:limit]
+
+    keep_candidates = [
+        item for item in sorted(scored, key=lambda item: (-item["score"], item["role_id"])) if item["score"] > 0
+    ][:ROLE_REVIEW_KEEP_DISPLAY_LIMIT]
+    return disable_candidates, keep_candidates
+
+
+def _project_initialization_base_issues(root: Path, runtime: dict[str, Any]) -> list[str]:
     issues: list[str] = []
 
     config = runtime["config"]
@@ -993,20 +1218,30 @@ def _project_initialization_issues(root: Path, runtime: dict[str, Any]) -> list[
     if not isinstance(enabled_roles, list) or not enabled_roles:
         issues.append("project/config/project.yaml: roles.enabled must include at least one role.")
 
+    context_values = _project_context_values(root)
     context_path = root / "project" / "context" / "project-context.md"
     if not context_path.exists():
         issues.append("project/context/project-context.md is missing.")
         return issues
 
-    context_text = context_path.read_text(encoding="utf-8")
     for field_label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS:
-        value = _extract_project_context_value(context_text, field_label)
+        value = context_values.get(field_label, "")
         if not _is_value_defined(value):
             issues.append(
                 "project/context/project-context.md: "
                 f"fill '{field_label}' with project-specific content."
             )
 
+    return issues
+
+
+def _project_initialization_issues(root: Path, runtime: dict[str, Any]) -> list[str]:
+    issues = _project_initialization_base_issues(root, runtime)
+    if issues:
+        return issues
+    config = runtime["config"]
+    if not _role_review_confirmed(config):
+        issues.append(ROLE_REVIEW_PENDING_ISSUE)
     return issues
 
 
@@ -1020,6 +1255,67 @@ def _initialization_prompt_default(field_name: str, current_value: str) -> str:
     return "<fill-this>"
 
 
+def _is_initialization_value_thin(value: str) -> bool:
+    if not _is_value_defined(value):
+        return True
+    cleaned = " ".join(str(value).strip().split())
+    words = [token for token in cleaned.split(" ") if token]
+    return (
+        len(words) < INITIALIZATION_DETAIL_MIN_WORDS
+        or len(cleaned) < INITIALIZATION_DETAIL_MIN_CHARS
+    )
+
+
+def _bootstrap_deep_intake_lines(values: dict[str, str]) -> list[str]:
+    lines: list[str] = []
+    lines.append("## Optional Deep-Dive Intake (Recommended)")
+    lines.append("")
+    lines.append(
+        "If you want stronger planning quality, ask the user for richer detail now. "
+        "Use this when answers are short, ambiguous, or likely to cause rework."
+    )
+    lines.append("")
+
+    thin_fields: list[str] = []
+    for field_name, prompts in INITIALIZATION_DEEP_DIVE_QUESTIONS:
+        value = values.get(field_name, "")
+        if not _is_initialization_value_thin(value):
+            continue
+        thin_fields.append(field_name)
+        lines.append(f"### Drill Into `{field_name}`")
+        for prompt in prompts:
+            lines.append(f"- {prompt}")
+        lines.append("")
+
+    if thin_fields:
+        lines.append(
+            "Current responses are thin for: "
+            + ", ".join(f"`{item}`" for item in thin_fields)
+            + "."
+        )
+        lines.append(
+            "Operator should collect deeper answers before starting planning, "
+            "unless the user explicitly chooses a quick-start path."
+        )
+    else:
+        lines.append(
+            "Current responses appear detailed enough; deep-dive intake is optional."
+        )
+    lines.append("")
+    lines.append("### Optional Deep-Dive Reply Template")
+    lines.append("")
+    lines.append("```text")
+    lines.append("deep_intake: yes")
+    lines.append("Project goals.detail: <metrics + timeline + business outcome>")
+    lines.append("Target users.detail: <primary segment + pains + out-of-scope segments>")
+    lines.append("Key constraints.detail: <hard constraints + acceptable tradeoffs>")
+    lines.append("Primary deliverables.detail: <mandatory outputs + optional outputs>")
+    lines.append("Acceptance criteria.detail: <objective checks + approver + evidence>")
+    lines.append("```")
+    lines.append("")
+    return lines
+
+
 def _bootstrap_intake_lines(root: Path, config: dict[str, Any]) -> list[str]:
     lines: list[str] = []
     project = config.get("project", {})
@@ -1030,12 +1326,7 @@ def _bootstrap_intake_lines(root: Path, config: dict[str, Any]) -> list[str]:
     if project_name.lower() == "sample project":
         project_name = ""
 
-    context_values = {label: "" for label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS}
-    context_path = root / "project" / "context" / "project-context.md"
-    if context_path.exists():
-        context_text = context_path.read_text(encoding="utf-8")
-        for label in INITIALIZATION_REQUIRED_CONTEXT_FIELDS:
-            context_values[label] = _extract_project_context_value(context_text, label)
+    context_values = _project_context_values(root)
 
     values: dict[str, str] = {"project.id": project_id, "project.name": project_name}
     values.update(context_values)
@@ -1064,8 +1355,106 @@ def _bootstrap_intake_lines(root: Path, config: dict[str, Any]) -> list[str]:
     lines.append(
         "After you reply, Operator should write the values into "
         "`project/config/project.yaml` and `project/context/project-context.md`, "
-        "then continue initialization to `READY`."
+        "then run role enablement review and continue initialization to `READY` "
+        "after user confirmation."
     )
+    lines.append("")
+    lines.extend(_bootstrap_deep_intake_lines(values))
+    return lines
+
+
+def _bootstrap_role_review_lines(
+    root: Path,
+    config: dict[str, Any],
+    base_ready: bool,
+) -> list[str]:
+    lines: list[str] = []
+    roles_cfg = config.get("roles", {})
+    enabled_roles = roles_cfg.get("enabled", [])
+    disabled_roles = roles_cfg.get("disabled", [])
+    if not isinstance(enabled_roles, list):
+        enabled_roles = []
+    if not isinstance(disabled_roles, list):
+        disabled_roles = []
+    review_confirmed = _role_review_confirmed(config)
+
+    lines.append("## Role Enablement Review")
+    lines.append("")
+    lines.append(
+        "All roles are enabled by default. Operator should recommend a smaller active role set "
+        "for this project and wait for explicit user confirmation before proceeding."
+    )
+    lines.append("")
+    lines.append(f"- Current enabled roles: `{len(enabled_roles)}`")
+    lines.append(f"- Current disabled roles: `{len(disabled_roles)}`")
+    lines.append(f"- Review confirmed (`roles.{ROLE_REVIEW_CONFIRMATION_KEY}`): `{str(review_confirmed).lower()}`")
+    lines.append("")
+
+    if not base_ready:
+        lines.append(
+            "Role recommendations are deferred until required project fields are complete."
+        )
+        lines.append(
+            "After goals/users/constraints/deliverables/acceptance criteria are filled, "
+            "Operator should run role review and collect user confirmation."
+        )
+        lines.append("")
+        return lines
+
+    disable_recs, keep_recs = _role_review_recommendations(root, config)
+    if disable_recs:
+        lines.append("### Suggested Roles To Disable")
+        lines.append("")
+        display = disable_recs[:ROLE_REVIEW_DISABLE_DISPLAY_LIMIT]
+        for item in display:
+            role_id = item["role_id"]
+            score = item["score"]
+            overlap = item.get("overlap", [])
+            if overlap:
+                reason = f"low relevance score `{score}` (matched tokens: {', '.join(overlap)})"
+            else:
+                reason = "no direct match to current project goals/deliverables/constraints"
+            lines.append(f"- `{role_id}`: {reason}")
+        hidden = len(disable_recs) - len(display)
+        if hidden > 0:
+            lines.append(f"- ... plus `{hidden}` additional low-relevance roles.")
+        lines.append("")
+    else:
+        lines.append(
+            "No clear low-relevance roles were detected from current project context."
+        )
+        lines.append("")
+
+    if keep_recs:
+        lines.append("### High-Relevance Roles To Keep Enabled")
+        lines.append("")
+        for item in keep_recs:
+            role_id = item["role_id"]
+            score = item["score"]
+            overlap = item.get("overlap", [])
+            evidence = ", ".join(overlap) if overlap else "context fit"
+            lines.append(f"- `{role_id}`: relevance score `{score}` ({evidence})")
+        lines.append("")
+
+    if review_confirmed:
+        lines.append("Role review is already confirmed.")
+        lines.append("")
+        return lines
+
+    lines.append("### User Confirmation Required (Copy/Paste Template)")
+    lines.append("")
+    lines.append("```text")
+    lines.append("role_review.confirmed: yes")
+    lines.append("role_review.decision: apply-recommendations | keep-all | custom")
+    lines.append("roles.disable: <comma-separated role IDs to disable or leave blank>")
+    lines.append("roles.enable: <comma-separated role IDs to force-enable or leave blank>")
+    lines.append("```")
+    lines.append("")
+    lines.append(
+        "After user confirmation, Operator should update `project/config/project.yaml`:"
+    )
+    lines.append("- set `roles.disabled` and `roles.enabled` per confirmed decision")
+    lines.append(f"- set `roles.{ROLE_REVIEW_CONFIRMATION_KEY}: true`")
     lines.append("")
     return lines
 
@@ -1074,6 +1463,7 @@ def _operator_bootstrap_packet(
     root: Path,
     config: dict[str, Any],
     init_issues: list[str],
+    base_init_issues: list[str],
     manifest_paths: list[str],
 ) -> str:
     project = config.get("project", {})
@@ -1101,11 +1491,21 @@ def _operator_bootstrap_packet(
         for issue in init_issues:
             lines.append(f"- {issue}")
         lines.append("")
-        lines.extend(_bootstrap_intake_lines(root, config))
+        if base_init_issues:
+            lines.extend(_bootstrap_intake_lines(root, config))
+        else:
+            lines.append(
+                "Project details are already defined. Complete role enablement review "
+                "confirmation to clear the final initialization gate."
+            )
+            lines.append("")
+        lines.extend(_bootstrap_role_review_lines(root, config, base_ready=not base_init_issues))
     else:
         lines.append("Status: `READY`")
         lines.append("")
         lines.append("Project context and mandatory config are complete.")
+        lines.append("")
+        lines.extend(_bootstrap_role_review_lines(root, config, base_ready=True))
     lines.append("")
     lines.append("## Operator Procedure")
     lines.append("")
@@ -1113,8 +1513,19 @@ def _operator_bootstrap_packet(
     lines.append("2. If gate is blocked, ask targeted questions and update:")
     lines.append("   - `project/context/project-context.md`")
     lines.append("   - `project/config/project.yaml`")
-    lines.append("3. Do not invoke work agents until gate is `READY`.")
-    lines.append("4. Once ready, collect user request and produce `operator_plan` JSON only.")
+    lines.append(
+        "3. If required fields are present but thin, run optional deep-dive intake "
+        "questions before planning."
+    )
+    lines.append(
+        "4. Run role enablement review: propose disable recommendations and wait "
+        "for explicit user confirmation."
+    )
+    lines.append(
+        f"5. Update `roles.{ROLE_REVIEW_CONFIRMATION_KEY}: true` after confirmation."
+    )
+    lines.append("6. Do not invoke work agents until gate is `READY`.")
+    lines.append("7. Once ready, collect user request and produce `operator_plan` JSON only.")
     lines.append("")
     lines.append("## Enabled Roles")
     lines.append("")
@@ -1138,11 +1549,19 @@ def cmd_bootstrap_operator(args: argparse.Namespace) -> int:
         return 1
 
     config = validators.load_project_config(root)
-    init_issues = _project_initialization_issues(root, {"config": config})
+    runtime_stub = {"config": config}
+    base_init_issues = _project_initialization_base_issues(root, runtime_stub)
+    init_issues = _project_initialization_issues(root, runtime_stub)
     manifest = context_loader.build_manifest(root, "operator")
     manifest_paths = context_loader.manifest_paths(manifest)
 
-    packet = _operator_bootstrap_packet(root, config, init_issues, manifest_paths)
+    packet = _operator_bootstrap_packet(
+        root,
+        config,
+        init_issues,
+        base_init_issues,
+        manifest_paths,
+    )
     output_path = root / args.output
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(packet, encoding="utf-8")

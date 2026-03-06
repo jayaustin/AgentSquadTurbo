@@ -421,6 +421,9 @@ def _validate_project_config(config: dict[str, Any]) -> list[str]:
         errors.append("project config must include host.primary_adapter and host.adapter_command.")
     if not isinstance(roles, dict) or "enabled" not in roles or "disabled" not in roles:
         errors.append("project config must include roles.enabled and roles.disabled.")
+    if isinstance(roles, dict) and "review_confirmed" in roles:
+        if not isinstance(roles["review_confirmed"], bool):
+            errors.append("roles.review_confirmed must be boolean when provided.")
     if execution.get("mode") != "sequential":
         errors.append("execution.mode must be 'sequential'.")
     if execution.get("handoff_authority") != "operator-mediated":
