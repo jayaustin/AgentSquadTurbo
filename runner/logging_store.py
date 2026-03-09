@@ -3,12 +3,17 @@
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
 DATETIME_FORMAT = "%Y-%m-%d %H:%M:%S"
 FILE_TS_FORMAT = "%Y-%m-%d_%H-%M-%S"
+RECENT_ACTIVITY_MAX_ITEMS = 5
+RECENT_ACTIVITY_ENTRY_PATTERN = re.compile(
+    r"^- `([^`]+)` \| Task `([^`]+)` \| Status `([^`]*)` \| (.*)$"
+)
 
 
 def _safe_segment(value: str) -> str:
@@ -41,6 +46,82 @@ def _append_jsonl(path: Path, payload: dict[str, Any]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as handle:
         handle.write(json.dumps(payload, ensure_ascii=True) + "\n")
+
+
+def _recent_activity_path(root: Path, role_id: str) -> Path:
+    return root / "agents" / "roles" / role_id / "recent_activity.md"
+
+
+def _load_recent_activity_entries(path: Path) -> list[dict[str, str]]:
+    if not path.exists():
+        return []
+    entries: list[dict[str, str]] = []
+    for raw_line in path.read_text(encoding="utf-8").splitlines():
+        match = RECENT_ACTIVITY_ENTRY_PATTERN.match(raw_line.strip())
+        if not match:
+            continue
+        entries.append(
+            {
+                "ts_utc": match.group(1).strip(),
+                "task_id": match.group(2).strip(),
+                "status": match.group(3).strip(),
+                "summary": match.group(4).strip(),
+            }
+        )
+    return entries
+
+
+def _write_recent_activity_doc(root: Path, role_id: str, entries: list[dict[str, str]]) -> Path:
+    path = _recent_activity_path(root, role_id)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    updated_ts = timestamp_now()
+    lines: list[str] = []
+    lines.append(f"# Recent Activity: {role_id}")
+    lines.append("")
+    lines.append("High-level summary of the most recent tasks this role has worked on.")
+    lines.append(f"Updated (UTC): `{updated_ts}`")
+    lines.append("")
+    lines.append("## Latest 5 Tasks")
+    lines.append("")
+    if entries:
+        for entry in entries[:RECENT_ACTIVITY_MAX_ITEMS]:
+            lines.append(
+                f"- `{entry['ts_utc']}` | Task `{entry['task_id']}` | "
+                f"Status `{entry['status']}` | {entry['summary']}"
+            )
+    else:
+        lines.append("- No role activity has been recorded yet.")
+    lines.append("")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return path
+
+
+def update_recent_activity(
+    root: Path,
+    role_id: str,
+    task_id: str,
+    status: str,
+    summary: str,
+) -> Path:
+    existing = _load_recent_activity_entries(_recent_activity_path(root, role_id))
+    new_entry = {
+        "ts_utc": timestamp_now(),
+        "task_id": str(task_id or "no-task").strip() or "no-task",
+        "status": str(status or "Logged").strip() or "Logged",
+        "summary": str(summary or "No summary provided.").strip() or "No summary provided.",
+    }
+    merged = [new_entry, *existing]
+    deduped: list[dict[str, str]] = []
+    seen_task_ids: set[str] = set()
+    for entry in merged:
+        task_key = entry.get("task_id", "").strip()
+        if task_key in seen_task_ids:
+            continue
+        seen_task_ids.add(task_key)
+        deduped.append(entry)
+        if len(deduped) >= RECENT_ACTIVITY_MAX_ITEMS:
+            break
+    return _write_recent_activity_doc(root, role_id, deduped)
 
 
 def write_activity_event(
@@ -157,5 +238,24 @@ def write_run_journal(
         run_journal_path=run_path,
         status=event_status,
         metadata=base_metadata,
+    )
+    recent_activity_path = update_recent_activity(
+        root=root,
+        role_id=role_id,
+        task_id=task_id,
+        status=event_status or "Logged",
+        summary=event_summary,
+    ).relative_to(root).as_posix()
+    write_activity_event(
+        root=root,
+        role_id=role_id,
+        task_id=task_id,
+        event_type="file_modified",
+        summary=(
+            f"{role_id} modified file '{recent_activity_path}' to refresh recent activity "
+            f"for task '{task_id}'."
+        ),
+        status="Logged",
+        metadata={"path": recent_activity_path},
     )
     return path

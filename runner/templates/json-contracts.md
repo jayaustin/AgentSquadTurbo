@@ -6,7 +6,9 @@
   "decision_log": [
     "Chose discovery-first sequencing due unknown localization constraints."
   ],
-  "unexpected_events": [],
+  "unexpected_events": [
+    "WARNING: Market launch locale is unspecified."
+  ],
   "human_feedback": {
     "summary": "Need clarification on launch markets before final sequencing.",
     "questions": [
@@ -41,6 +43,8 @@
 - `initial_role_sequence` must not include `operator`.
 - `human_feedback` is optional and should be present when Operator needs user input.
 - `decision_log` entries should be concise and actionable.
+- `unexpected_events` entries should include severity prefixes:
+  `ERROR: ...` or `WARNING: ...`.
 
 # agent_result
 
@@ -65,7 +69,7 @@
     "Kept parser pure and moved side effects to orchestrator boundary."
   ],
   "unexpected_events": [
-    "Input sample contained malformed CSV row 184."
+    "ERROR: Input sample contained malformed CSV row 184."
   ],
   "human_feedback": {
     "summary": "Need user preference for default locale fallback order.",
@@ -93,7 +97,12 @@
 `agent_result` ownership rules:
 
 - `updates.owner` may not be `operator`.
-- Any task in `new_tasks` may not use `owner: "operator"`.
+- Non-operator roles may not create tasks in `new_tasks`; this field must be
+  empty for non-operator invocations.
+- If additional work is required, request task creation through Operator using
+  `role_feedback`, `human_feedback`, or `handoff_request`.
 - `human_feedback` and `role_feedback` are optional but should be used when
   communication is required.
 - `role_feedback.target_role` must be a known role ID.
+- `unexpected_events` entries should include severity prefixes:
+  `ERROR: ...` or `WARNING: ...`.

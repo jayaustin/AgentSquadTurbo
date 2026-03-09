@@ -430,6 +430,12 @@ def _validate_project_config(config: dict[str, Any]) -> list[str]:
         errors.append("execution.handoff_authority must be 'operator-mediated'.")
     if execution.get("selection_policy") != "dependency-fifo":
         errors.append("execution.selection_policy must be 'dependency-fifo'.")
+    unexpected_policy = execution.get("unexpected_event_policy", "errors-only")
+    if unexpected_policy not in {"errors-only", "errors-or-warnings", "proceed"}:
+        errors.append(
+            "execution.unexpected_event_policy must be one of "
+            "['errors-only', 'errors-or-warnings', 'proceed']."
+        )
 
     session_mode = host.get("session_mode", "per-role-threads")
     if session_mode not in {"per-role-threads", "stateless"}:

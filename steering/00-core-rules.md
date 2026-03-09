@@ -13,29 +13,50 @@ Define universal behavior for all roles in this framework.
 5. Halt execution when required context cannot be loaded.
 6. Do not bypass validation for contract shape or status transitions.
 7. Do not begin agent task execution until project initialization is complete.
-8. Treat file persistence as part of completion: critical outputs are not complete
+8. After initialization is `READY`, no agent (including Operator) may change
+   project definitions, project config, or steering files without explicit human
+   permission. Protected paths:
+   - `project/context/**`
+   - `project/config/**`
+   - `steering/**`
+9. Treat file persistence as part of completion: critical outputs are not complete
    until written to the required `.md` files.
-9. After critical file updates, regenerate `project/state/dashboard.html` so the
+10. After critical file updates, regenerate `project/state/dashboard.html` so the
    browser view reflects current project truth.
-10. Operator acts as project manager/orchestrator and never executes specialist
+11. Operator acts as project manager/orchestrator and never executes specialist
     backlog tasks.
-11. Task ownership `owner: operator` is forbidden for all roles.
+12. Task ownership `owner: operator` is forbidden for all roles.
 
 ## Logging Requirements
 
 1. Every backlog modification must be logged with task-level detail describing
    what changed.
-2. Every file modification must produce a dedicated log line with the file path.
+2. Every file modification must produce a dedicated log line with:
+   - file path
+   - brief explanation of what changed
 3. Operator must log role dispatch (`role + task`) and role return
    (`role + resulting status/summary`) for each execution turn.
 4. If a role needs human input, the role must write a local feedback artifact
    file and log the artifact path.
+   - Artifact file path: `project/workspaces/<source-role>/feedback/<timestamp>-<task-id>-to-human.md`
+   - Log locations: `project/state/activity-log.jsonl` and
+     `project/workspaces/<source-role>/activity.jsonl`
 5. If a role needs to pass feedback/questions to another role, it must write a
    local feedback artifact file and log the artifact path.
+   - Artifact file path:
+     `project/workspaces/<source-role>/feedback/<timestamp>-<task-id>-to-<target-role>.md`
+   - Log locations: `project/state/activity-log.jsonl` and
+     `project/workspaces/<source-role>/activity.jsonl`
 6. Unexpected events must be logged explicitly as warnings/errors.
-7. Decision logs should capture meaningful decisions, assumptions, and tradeoff
+7. Unexpected-event return behavior is controlled by:
+   - `project/config/project.yaml` -> `execution.unexpected_event_policy`
+   - Allowed values:
+     - `errors-only`: return control to user on errors, continue on warnings.
+     - `errors-or-warnings`: return control to user on errors or warnings.
+     - `proceed`: proceed when possible and only log warnings/errors.
+8. Decision logs should capture meaningful decisions, assumptions, and tradeoff
    choices made during task execution.
-8. All logged date-time values use `YYYY-MM-DD HH:MM:SS`.
+9. All logged date-time values use `YYYY-MM-DD HH:MM:SS`.
 
 ## Project Initialization Gate
 
@@ -54,7 +75,7 @@ Before any agent work can start, Operator must confirm:
 6. Operator must perform role enablement review and obtain explicit user
    confirmation before initialization is `READY`:
    - all roles start enabled by default
-   - Operator should recommend which roles to disable
+   - based on project description, Operator should recommend which roles to disable
    - `roles.review_confirmed` must be set to `true` after confirmation
 
 ## Persistence Requirement

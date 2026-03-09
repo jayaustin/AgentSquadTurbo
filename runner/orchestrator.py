@@ -106,6 +106,18 @@ ROLE_REVIEW_PENDING_ISSUE = (
 ROLE_REVIEW_DISABLE_DISPLAY_LIMIT = 30
 ROLE_REVIEW_KEEP_DISPLAY_LIMIT = 12
 ROLE_REVIEW_CORE_KEEP = {"operator", "product-manager", "technical-architect", "qa-manager"}
+UNEXPECTED_EVENT_POLICY_VALUES = {"errors-only", "errors-or-warnings", "proceed"}
+DEFAULT_UNEXPECTED_EVENT_POLICY = "errors-only"
+PROTECTED_GOVERNANCE_PATH_PREFIXES = (
+    "project/config/",
+    "project/context/",
+    "steering/",
+)
+GOVERNANCE_EDIT_APPROVAL_PATTERNS = (
+    r"(?i)\[allow-governance-edits\]",
+    r"(?i)\bgovernance_file_edits_approved\s*:\s*(true|yes)\b",
+    r"(?i)\bapprove\.governance_file_edits\s*:\s*(true|yes)\b",
+)
 ROLE_REVIEW_TOKEN_STOPWORDS = {
     "the",
     "and",
@@ -174,7 +186,7 @@ STEERING_SEEDS = {
     ),
     "01-context-lifecycle.md": (
         "# Context Lifecycle\n\n"
-        "Load order: steering -> role -> project -> role-override.\n"
+        "Load order: steering -> role -> project -> role-override -> recent-activity.\n"
     ),
     "02-backlog-governance.md": (
         "# Backlog Governance\n\n"
@@ -207,6 +219,7 @@ def _default_state() -> dict[str, Any]:
         "role_sequence": [],
         "last_completed_task_id": "",
         "current_request": "",
+        "governance_file_edits_approved": False,
         "halted": False,
         "halt_reason": "",
         "role_sessions": {},
@@ -355,6 +368,22 @@ def _registry_seed(role_definitions: dict[str, dict[str, Any]]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def _recent_activity_seed_content(role_id: str) -> str:
+    return "\n".join(
+        [
+            f"# Recent Activity: {role_id}",
+            "",
+            "High-level summary of the most recent tasks this role has worked on.",
+            "Updated (UTC): `never`",
+            "",
+            "## Latest 5 Tasks",
+            "",
+            "- No role activity has been recorded yet.",
+            "",
+        ]
+    )
+
+
 def _project_config_seed(role_definitions: dict[str, dict[str, Any]]) -> dict[str, Any]:
     return {
         "project": {"id": "sample-project", "name": "Sample Project"},
@@ -377,6 +406,7 @@ def _project_config_seed(role_definitions: dict[str, dict[str, Any]]) -> dict[st
             "mode": "sequential",
             "handoff_authority": "operator-mediated",
             "selection_policy": "dependency-fifo",
+            "unexpected_event_policy": DEFAULT_UNEXPECTED_EVENT_POLICY,
         },
         "backlog": {"statuses": DEFAULT_STATUSES},
         "dashboard": validators.dashboard_config_with_defaults({}),
@@ -406,6 +436,9 @@ def seed_scaffold(root: Path) -> list[Path]:
         role_path = root / "agents" / "roles" / role_id / "agent-role.md"
         if _write_if_missing(role_path, _role_frontmatter_content(role_id, meta)):
             created.append(role_path)
+        recent_activity_path = root / "agents" / "roles" / role_id / "recent_activity.md"
+        if _write_if_missing(recent_activity_path, _recent_activity_seed_content(role_id)):
+            created.append(recent_activity_path)
 
     project_config_path = root / "project" / "config" / "project.yaml"
     if not project_config_path.exists():
@@ -480,6 +513,9 @@ def load_state(root: Path) -> dict[str, Any]:
         state["role_sessions"] = {}
     if not isinstance(state.get("history"), list):
         state["history"] = []
+    state["governance_file_edits_approved"] = bool(
+        state.get("governance_file_edits_approved", False)
+    )
     return state
 
 
@@ -628,6 +664,105 @@ def _diff_file_snapshots(
     return {"created": created, "modified": modified, "deleted": deleted}
 
 
+def _has_governance_edit_permission(request_text: str) -> bool:
+    raw = str(request_text or "").strip()
+    if not raw:
+        return False
+    return any(re.search(pattern, raw) for pattern in GOVERNANCE_EDIT_APPROVAL_PATTERNS)
+
+
+def _is_protected_governance_path(rel_path: str) -> bool:
+    normalized = str(rel_path).strip().replace("\\", "/")
+    return any(normalized.startswith(prefix) for prefix in PROTECTED_GOVERNANCE_PATH_PREFIXES)
+
+
+def _collect_protected_governance_changes(
+    file_changes: dict[str, list[str]],
+) -> list[dict[str, str]]:
+    changes: list[dict[str, str]] = []
+    for action in ("created", "modified", "deleted"):
+        for rel_path in file_changes.get(action, []):
+            if not _is_protected_governance_path(rel_path):
+                continue
+            changes.append({"action": action, "path": rel_path})
+    return changes
+
+
+def _enforce_protected_governance_edit_guardrail(
+    root: Path,
+    role_id: str,
+    task_id: str,
+    protected_changes: list[dict[str, str]],
+    governance_permission_granted: bool,
+) -> None:
+    if not protected_changes:
+        return
+
+    changed_paths = sorted({item["path"] for item in protected_changes})
+    details = ", ".join(f"{item['action']}:{item['path']}" for item in protected_changes)
+    if governance_permission_granted:
+        logging_store.write_activity_event(
+            root=root,
+            role_id=role_id,
+            task_id=task_id,
+            event_type="governance_edit_approved",
+            summary=(
+                f"{role_id} changed protected governance files with explicit human permission: "
+                f"{', '.join(changed_paths)}."
+            ),
+            status="Approved",
+            metadata={"changes": protected_changes},
+        )
+        return
+
+    guidance = (
+        "Explicit human approval is required. Include one of: "
+        "`[ALLOW-GOVERNANCE-EDITS]`, "
+        "`governance_file_edits_approved: true`, or "
+        "`approve.governance_file_edits: true` in the request."
+    )
+    summary = (
+        f"{role_id} changed protected governance files without explicit human approval: {details}. "
+        f"{guidance}"
+    )
+    logging_store.write_activity_event(
+        root=root,
+        role_id=role_id,
+        task_id=task_id,
+        event_type="unexpected_error",
+        summary=summary,
+        status="Error",
+        metadata={"changes": protected_changes},
+    )
+    raise OrchestrationHalt(
+        "Governance edit guardrail triggered. "
+        f"Protected files changed without explicit human approval: {', '.join(changed_paths)}. "
+        f"{guidance}"
+    )
+
+
+def _unexpected_event_policy(runtime: dict[str, Any]) -> str:
+    configured = str(runtime.get("unexpected_event_policy", DEFAULT_UNEXPECTED_EVENT_POLICY)).strip().lower()
+    if configured in UNEXPECTED_EVENT_POLICY_VALUES:
+        return configured
+    return DEFAULT_UNEXPECTED_EVENT_POLICY
+
+
+def _unexpected_requires_return_to_user(
+    runtime: dict[str, Any],
+    has_warning: bool,
+    has_error: bool,
+) -> bool:
+    policy = _unexpected_event_policy(runtime)
+    if policy == "proceed":
+        return False
+    if has_error:
+        return True
+    if has_warning and policy == "errors-or-warnings":
+        return True
+    return False
+
+
 def _emit_file_change_logs(
     root: Path,
     role_id: str,
@@ -638,14 +773,14 @@ def _emit_file_change_logs(
     events: list[str] = []
     for action in ("created", "modified", "deleted"):
         for rel_path in file_changes.get(action, []):
-            line = f"file_{action}: `{rel_path}` ({reason})"
+            line = f"file_{action}: `{rel_path}` ({reason}; action={action})"
             events.append(line)
             logging_store.write_activity_event(
                 root=root,
                 role_id=role_id,
                 task_id=task_id,
                 event_type=f"file_{action}",
-                summary=f"{role_id} {action} file '{rel_path}'.",
+                summary=f"{role_id} {action} file '{rel_path}' ({reason}).",
                 status="Logged",
                 metadata={"path": rel_path, "reason": reason},
             )
@@ -760,24 +895,40 @@ def _emit_unexpected_logs(
     role_id: str,
     task_id: str,
     unexpected_entries: list[str],
-) -> list[str]:
+) -> tuple[list[str], bool, bool]:
     events: list[str] = []
+    has_warning = False
+    has_error = False
     for item in unexpected_entries:
         cleaned = str(item).strip()
         if not cleaned:
             continue
-        line = f"unexpected: {cleaned}"
+        severity = "warning"
+        message = cleaned
+        if re.match(r"(?i)^\s*(error|err|fatal)\s*[:\-]\s*", message):
+            severity = "error"
+            message = re.sub(r"(?i)^\s*(error|err|fatal)\s*[:\-]\s*", "", message).strip() or cleaned
+        elif re.match(r"(?i)^\s*(warn|warning)\s*[:\-]\s*", message):
+            severity = "warning"
+            message = re.sub(r"(?i)^\s*(warn|warning)\s*[:\-]\s*", "", message).strip() or cleaned
+
+        if severity == "error":
+            has_error = True
+        else:
+            has_warning = True
+
+        line = f"unexpected_{severity}: {message}"
         events.append(line)
         logging_store.write_activity_event(
             root=root,
             role_id=role_id,
             task_id=task_id,
-            event_type="unexpected_event",
-            summary=cleaned,
-            status="Warning",
-            metadata={},
+            event_type=f"unexpected_{severity}",
+            summary=message,
+            status="Error" if severity == "error" else "Warning",
+            metadata={"severity": severity},
         )
-    return events
+    return events, has_warning, has_error
 
 
 def _parse_utc(value: str | None) -> datetime | None:
@@ -818,6 +969,18 @@ def _resolve_role_session_plan(
     context_hash: str,
 ) -> dict[str, Any]:
     mode = runtime.get("session_mode", "per-role-threads")
+    if role_id == "operator":
+        reasons = ["operator-forced-full-context-reload"]
+        if mode != "per-role-threads":
+            reasons.append("stateless-mode")
+        return {
+            "mode": mode,
+            "reuse": False,
+            "session_id": None,
+            "refresh_reasons": reasons,
+            "full_context_required": True,
+        }
+
     if mode != "per-role-threads":
         return {
             "mode": mode,
@@ -952,7 +1115,12 @@ def _invoke_with_retry(
             if contract_type == "operator_plan":
                 parsed = contracts.validate_operator_plan(payload, statuses, known_roles)
             elif contract_type == "agent_result":
-                parsed = contracts.validate_agent_result(payload, statuses, known_roles)
+                parsed = contracts.validate_agent_result(
+                    payload,
+                    statuses,
+                    known_roles,
+                    invoking_role=role_id,
+                )
             else:
                 raise ValueError(f"Unknown contract_type '{contract_type}'.")
             if runtime.get("session_mode") == "per-role-threads":
@@ -992,6 +1160,9 @@ def _runtime(root: Path) -> dict[str, Any]:
     adapter_command = str(config["host"]["adapter_command"])
     session_mode = str(config["host"].get("session_mode", "per-role-threads"))
     context_rot_guardrails = config["host"].get("context_rot_guardrails", {})
+    unexpected_event_policy = str(
+        config.get("execution", {}).get("unexpected_event_policy", DEFAULT_UNEXPECTED_EVENT_POLICY)
+    ).strip().lower()
     adapter = build_adapter(adapter_name)
     return {
         "config": config,
@@ -1004,6 +1175,11 @@ def _runtime(root: Path) -> dict[str, Any]:
         "adapter_command": adapter_command,
         "session_mode": session_mode,
         "context_rot_guardrails": context_rot_guardrails,
+        "unexpected_event_policy": (
+            unexpected_event_policy
+            if unexpected_event_policy in UNEXPECTED_EVENT_POLICY_VALUES
+            else DEFAULT_UNEXPECTED_EVENT_POLICY
+        ),
         "dashboard": dashboard_config,
     }
 
@@ -1524,8 +1700,13 @@ def _operator_bootstrap_packet(
     lines.append(
         f"5. Update `roles.{ROLE_REVIEW_CONFIRMATION_KEY}: true` after confirmation."
     )
-    lines.append("6. Do not invoke work agents until gate is `READY`.")
-    lines.append("7. Once ready, collect user request and produce `operator_plan` JSON only.")
+    lines.append(
+        "6. After initialization is READY, do not edit `project/config/**`, "
+        "`project/context/**`, or `steering/**` without explicit human approval "
+        "(`governance_file_edits_approved: true` or `[ALLOW-GOVERNANCE-EDITS]`)."
+    )
+    lines.append("7. Do not invoke work agents until gate is `READY`.")
+    lines.append("8. Once ready, collect user request and produce `operator_plan` JSON only.")
     lines.append("")
     lines.append("## Enabled Roles")
     lines.append("")
@@ -1615,6 +1796,25 @@ def _invoke_operator(
         role_id="operator",
         context_hash=context_hash,
     )
+    manifest_paths = context_loader.manifest_paths(manifest)
+    refresh_reasons = list(session_plan.get("refresh_reasons", []))
+    logging_store.write_activity_event(
+        root=root,
+        role_id="operator",
+        task_id=f"operator-{mode_label}",
+        event_type="context_reload",
+        summary=(
+            "Operator reloaded full context manifest before invocation "
+            f"({len(manifest_paths)} files)."
+        ),
+        status="Loaded",
+        metadata={
+            "mode": mode_label,
+            "refresh_reasons": refresh_reasons,
+            "manifest_hash": context_hash,
+            "manifest_paths": manifest_paths,
+        },
+    )
     if session_plan["full_context_required"]:
         context_text = context_loader.compose_context_text(manifest)
     else:
@@ -1622,7 +1822,7 @@ def _invoke_operator(
             "Reuse existing operator thread context. "
             "Load context files again only if inconsistency is detected."
         )
-    manifest_text = "\n".join(f"- {path}" for path in context_loader.manifest_paths(manifest))
+    manifest_text = "\n".join(f"- {path}" for path in manifest_paths)
     template = _load_template(root, "operator-plan-prompt.md")
     contracts_doc = _load_template(root, "json-contracts.md")
 
@@ -1651,6 +1851,21 @@ def _invoke_operator(
     )
     after_files = _capture_file_snapshot(root)
     invocation_file_changes = _diff_file_snapshots(before_files, after_files)
+    file_change_events = _emit_file_change_logs(
+        root=root,
+        role_id="operator",
+        task_id=f"operator-{mode_label}",
+        file_changes=invocation_file_changes,
+        reason="during operator thread invocation",
+    )
+    protected_changes = _collect_protected_governance_changes(invocation_file_changes)
+    _enforce_protected_governance_edit_guardrail(
+        root=root,
+        role_id="operator",
+        task_id=f"operator-{mode_label}",
+        protected_changes=protected_changes,
+        governance_permission_granted=bool(state.get("governance_file_edits_approved", False)),
+    )
 
     updated_tasks, backlog_changed = _upsert_backlog_from_operator(
         root,
@@ -1676,16 +1891,12 @@ def _invoke_operator(
     )
 
     run_events: list[str] = [f"mode={mode_label}", "operator_plan parsed"]
-    run_events.extend(session_events)
-    run_events.extend(
-        _emit_file_change_logs(
-            root=root,
-            role_id="operator",
-            task_id=f"operator-{mode_label}",
-            file_changes=invocation_file_changes,
-            reason="during operator thread invocation",
-        )
+    run_events.append(
+        "context_reload: operator loaded full context manifest "
+        f"({len(manifest_paths)} files); reasons={', '.join(refresh_reasons)}"
     )
+    run_events.extend(session_events)
+    run_events.extend(file_change_events)
     run_events.extend(
         _emit_decision_logs(
             root=root,
@@ -1694,14 +1905,13 @@ def _invoke_operator(
             decisions=parsed.get("decision_log", []),
         )
     )
-    run_events.extend(
-        _emit_unexpected_logs(
-            root=root,
-            role_id="operator",
-            task_id=f"operator-{mode_label}",
-            unexpected_entries=parsed.get("unexpected_events", []),
-        )
+    unexpected_events, unexpected_warning, unexpected_error = _emit_unexpected_logs(
+        root=root,
+        role_id="operator",
+        task_id=f"operator-{mode_label}",
+        unexpected_entries=parsed.get("unexpected_events", []),
     )
+    run_events.extend(unexpected_events)
 
     for change in backlog_task_changes:
         detail = change["detail"]
@@ -1784,9 +1994,17 @@ def _invoke_operator(
             "mode": mode_label,
             "tasks_generated": len(parsed.get("tasks", [])),
             "backlog_task_changes": backlog_task_changes,
+            "unexpected_warning": unexpected_warning,
+            "unexpected_error": unexpected_error,
         },
     )
     _render_dashboard_best_effort(root, runtime, f"operator-{mode_label}")
+    if _unexpected_requires_return_to_user(runtime, unexpected_warning, unexpected_error):
+        policy = _unexpected_event_policy(runtime)
+        raise OrchestrationHalt(
+            "Operator returned unexpected events and policy requires human control handoff. "
+            f"policy='{policy}', has_warning={unexpected_warning}, has_error={unexpected_error}."
+        )
     return updated_tasks
 
 
@@ -1795,6 +2013,7 @@ def _apply_agent_result(
     result: dict[str, Any],
     statuses: list[str],
     known_roles: set[str],
+    actor_role: str,
 ) -> list[dict[str, Any]]:
     status_set = set(statuses)
     task_id = result["task_id"]
@@ -1829,6 +2048,11 @@ def _apply_agent_result(
         )
 
     if result.get("new_tasks"):
+        if actor_role != "operator":
+            raise OrchestrationHalt(
+                f"Task creation via agent_result.new_tasks is forbidden for non-operator role "
+                f"'{actor_role}'. Request new tasks through Operator mediation."
+            )
         tasks = backlog_store.upsert_tasks(tasks, result["new_tasks"])
     return tasks
 
@@ -1997,6 +2221,21 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
     )
     after_files = _capture_file_snapshot(root)
     invocation_file_changes = _diff_file_snapshots(before_files, after_files)
+    file_change_events = _emit_file_change_logs(
+        root=root,
+        role_id=owner,
+        task_id=task_id,
+        file_changes=invocation_file_changes,
+        reason="during role thread invocation",
+    )
+    protected_changes = _collect_protected_governance_changes(invocation_file_changes)
+    _enforce_protected_governance_edit_guardrail(
+        root=root,
+        role_id=owner,
+        task_id=task_id,
+        protected_changes=protected_changes,
+        governance_permission_granted=bool(state.get("governance_file_edits_approved", False)),
+    )
 
     logging_store.write_activity_event(
         root=root,
@@ -2016,7 +2255,13 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
     )
 
     tasks_before_apply = _clone_tasks(tasks)
-    updated_tasks = _apply_agent_result(tasks, parsed, runtime["statuses"], runtime["known_roles"])
+    updated_tasks = _apply_agent_result(
+        tasks,
+        parsed,
+        runtime["statuses"],
+        runtime["known_roles"],
+        actor_role=owner,
+    )
     backlog_store.write_backlog(backlog_path, updated_tasks)
     backlog_task_changes = _describe_task_changes(tasks_before_apply, updated_tasks)
     for change in backlog_task_changes:
@@ -2067,6 +2312,8 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
         )
 
     feedback_events: list[str] = []
+    internal_unexpected_warning = False
+    internal_unexpected_error = False
     human_feedback = parsed.get("human_feedback")
     if human_feedback:
         human_feedback_path = _write_feedback_file(
@@ -2108,6 +2355,7 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
     for role_feedback in role_feedback_entries:
         target_role = role_feedback.get("target_role", "")
         if target_role == owner:
+            internal_unexpected_warning = True
             feedback_events.append(
                 f"unexpected: ignored role_feedback targeting self role '{owner}'"
             )
@@ -2185,15 +2433,7 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
 
     backlog_after = backlog_store.render_backlog(backlog_store.read_backlog(backlog_path))
     events = [f"task={task_id}", f"owner={owner}", f"status={parsed['status']}"]
-    events.extend(
-        _emit_file_change_logs(
-            root=root,
-            role_id=owner,
-            task_id=task_id,
-            file_changes=invocation_file_changes,
-            reason="during role thread invocation",
-        )
-    )
+    events.extend(file_change_events)
     events.extend(
         _emit_decision_logs(
             root=root,
@@ -2202,14 +2442,15 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
             decisions=parsed.get("decision_log", []),
         )
     )
-    events.extend(
-        _emit_unexpected_logs(
-            root=root,
-            role_id=owner,
-            task_id=task_id,
-            unexpected_entries=parsed.get("unexpected_events", []),
-        )
+    unexpected_events, unexpected_warning, unexpected_error = _emit_unexpected_logs(
+        root=root,
+        role_id=owner,
+        task_id=task_id,
+        unexpected_entries=parsed.get("unexpected_events", []),
     )
+    events.extend(unexpected_events)
+    overall_unexpected_warning = unexpected_warning or internal_unexpected_warning
+    overall_unexpected_error = unexpected_error or internal_unexpected_error
     for change in backlog_task_changes:
         events.append(f"backlog_change: {change['detail']}")
     events.append("file_modified: `backlog.md` (agent_result persisted)")
@@ -2237,6 +2478,8 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
             "backlog_task_changes": backlog_task_changes,
             "role_feedback_count": len(role_feedback_entries),
             "human_feedback": bool(human_feedback),
+            "unexpected_warning": overall_unexpected_warning,
+            "unexpected_error": overall_unexpected_error,
         },
     )
 
@@ -2246,6 +2489,17 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
         {"ts": utc_now(), "event": "task-step", "task_id": task_id, "owner": owner}
     )
     _render_dashboard_best_effort(root, runtime, f"task-step-{task_id}")
+    if _unexpected_requires_return_to_user(
+        runtime,
+        overall_unexpected_warning,
+        overall_unexpected_error,
+    ):
+        policy = _unexpected_event_policy(runtime)
+        raise OrchestrationHalt(
+            "Role returned unexpected events and policy requires human control handoff. "
+            f"policy='{policy}', task_id='{task_id}', owner='{owner}', "
+            f"has_warning={overall_unexpected_warning}, has_error={overall_unexpected_error}."
+        )
     save_state(root, state)
     return True
 
@@ -2324,6 +2578,7 @@ def cmd_run(args: argparse.Namespace) -> int:
     state["halted"] = False
     state["halt_reason"] = ""
     state["current_request"] = args.request
+    state["governance_file_edits_approved"] = _has_governance_edit_permission(args.request)
     save_state(root, state)
 
     runtime: dict[str, Any] | None = None
@@ -2349,6 +2604,10 @@ def cmd_run(args: argparse.Namespace) -> int:
 def cmd_step(args: argparse.Namespace) -> int:
     root = repo_root()
     state = load_state(root)
+    state["governance_file_edits_approved"] = bool(
+        state.get("governance_file_edits_approved", False)
+        or _has_governance_edit_permission(str(state.get("current_request", "")))
+    )
     runtime: dict[str, Any] | None = None
     try:
         runtime = _prepare_runtime_or_exit(root)
@@ -2371,6 +2630,10 @@ def cmd_step(args: argparse.Namespace) -> int:
 def cmd_resume(args: argparse.Namespace) -> int:
     root = repo_root()
     state = load_state(root)
+    state["governance_file_edits_approved"] = bool(
+        state.get("governance_file_edits_approved", False)
+        or _has_governance_edit_permission(str(state.get("current_request", "")))
+    )
     runtime: dict[str, Any] | None = None
     try:
         runtime = _prepare_runtime_or_exit(root)

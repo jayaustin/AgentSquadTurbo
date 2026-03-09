@@ -16,7 +16,9 @@ Key ideas and value:
 - `Operator` is the only role that interfaces directly with the human request.
 - `Operator` acts as planner/orchestrator and does not own or execute backlog tasks.
 - Roles run sequentially with strict context load order:
-  `steering -> role -> project -> role-override`.
+  `steering -> role -> project -> role-override -> recent-activity`.
+- Each role maintains `agents/roles/<role-id>/recent_activity.md` with a
+  rolling summary of its latest five tasks for fresh-context continuity.
 - Backlog (`backlog.md`) is the source of truth for work ownership/status.
 - Contracts are machine-validated JSON (`operator_plan`, `agent_result`) with retry-then-halt behavior.
 - Persisted project truth is file-based (`.md`, `.yaml`, `.jsonl`) and surfaced through dashboard snapshots.
@@ -141,6 +143,7 @@ Configure in `project/config/project.yaml`:
 - `host.context_rot_guardrails.max_turns_per_role_session`
 - `host.context_rot_guardrails.max_session_age_minutes`
 - `host.context_rot_guardrails.force_reload_on_context_change`
+- `execution.unexpected_event_policy`: `errors-only` | `errors-or-warnings` | `proceed`
 
 How it works:
 
@@ -157,6 +160,10 @@ File access behavior:
 - Operator is not the only writer.
 - Orchestrator still owns critical framework writes and validation pathways for
   backlog/state/log/dashboard consistency.
+- After initialization is `READY`, edits to `project/config/**`,
+  `project/context/**`, and `steering/**` require explicit human approval.
+- Operator invocations force full context reload (no Operator session reuse) and
+  emit explicit `context_reload` log events to reduce context-rot risk.
 
 ## 7. Validation Guarantees
 
@@ -171,6 +178,7 @@ Framework/config integrity checks include:
 - referenced superpower IDs are valid
 - backlog header schema is exact
 - execution policy keys are constrained (`sequential`, `operator-mediated`, `dependency-fifo`)
+- unexpected-event policy value is constrained
 - dashboard config shape is validated
 
 Runtime contract and execution safeguards include:

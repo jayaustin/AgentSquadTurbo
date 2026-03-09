@@ -37,6 +37,10 @@ do the following before any planning or task execution:
     - wait for explicit confirmation before non-Operator role invocation
 11. Ask the user to reply directly with the completed template so Operator can write
     the values and move the gate to `READY`.
+12. After initialization is `READY`, do not modify `project/config/**`,
+    `project/context/**`, or `steering/**` unless the human explicitly approves
+    governance edits in the request (for example:
+    `governance_file_edits_approved: true` or `[ALLOW-GOVERNANCE-EDITS]`).
 
 ## Dashboard Responsibility
 

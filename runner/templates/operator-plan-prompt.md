@@ -14,8 +14,11 @@ Return ONLY valid JSON following the `operator_plan` contract.
 - NEVER include `operator` in `initial_role_sequence`.
 - Add `decision_log` with concise, meaningful planning decisions (no filler).
 - Add `unexpected_events` only when something unusual happened.
+  Use severity prefixes: `ERROR: ...` or `WARNING: ...`.
 - If you need human clarification, include `human_feedback` with
   `summary`, `questions`, and `requires_response=true`.
+- Do not modify `project/config/**`, `project/context/**`, or `steering/**`
+  unless the human has explicitly approved governance edits.
 - Do not include markdown fences.
 
 ## Human Request

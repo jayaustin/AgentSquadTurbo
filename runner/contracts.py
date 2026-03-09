@@ -231,7 +231,10 @@ def validate_operator_plan(
 
 
 def validate_agent_result(
-    payload: dict[str, Any], allowed_statuses: list[str], known_roles: set[str]
+    payload: dict[str, Any],
+    allowed_statuses: list[str],
+    known_roles: set[str],
+    invoking_role: str = "",
 ) -> dict[str, Any]:
     """Validate and normalize agent_result contract."""
     required = ("task_id", "status")
@@ -266,6 +269,13 @@ def validate_agent_result(
         new_tasks_raw = []
     if not isinstance(new_tasks_raw, list):
         raise ContractError("agent_result new_tasks must be a list.")
+    actor_role = _parse_scalar_string(invoking_role)
+    if new_tasks_raw and actor_role != "operator":
+        role_label = actor_role or "<unknown-role>"
+        raise ContractError(
+            f"agent_result new_tasks is forbidden for non-operator role '{role_label}'. "
+            "Non-operator roles must request new tasks from Operator instead of creating them directly."
+        )
     new_tasks = [_validate_task(task, status_set, known_roles) for task in new_tasks_raw]
 
     handoff_request = payload.get("handoff_request")

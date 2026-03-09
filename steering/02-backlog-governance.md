@@ -9,14 +9,18 @@
 1. `Owner` is a single non-operator role ID from the role registry.
 2. `Status` must be one of: `Todo`, `In Progress`, `Blocked`, `In Validation`, `Done`.
 3. `Dependencies` is a comma-separated list of task IDs or empty.
-4. Operator and non-operator roles can create and update tasks via machine-validated contracts.
-5. Task selection policy is dependency-first, FIFO second.
-6. Backlog execution is forbidden until project initialization gate passes.
-7. `operator_plan` output must be persisted to `backlog.md` before Operator reports
+4. Only Operator can create backlog tasks. Non-operator roles must send open-task
+   requests to Operator, and Operator must parse each request into one or more
+   backlog tasks.
+5. Operator and non-operator roles can update existing tasks via machine-validated
+   contracts.
+6. Task selection policy is dependency-first, FIFO second.
+7. Backlog execution is forbidden until project initialization gate passes.
+8. `operator_plan` output must be persisted to `backlog.md` before Operator reports
    plan completion.
-8. Returning task JSON in chat/console without updating `backlog.md` is invalid.
-9. After backlog changes, refresh dashboard snapshot so `Tasks` view stays in sync.
-10. Any attempt to set `owner: operator` (by Operator or non-Operator roles) is invalid.
+9. Returning task JSON in chat/console without updating `backlog.md` is invalid.
+10. After backlog changes, refresh dashboard snapshot so `Tasks` view stays in sync.
+11. Any attempt to set `owner: operator` (by Operator or non-Operator roles) is invalid.
 
 ## Initialization and Backlog
 
@@ -37,7 +41,7 @@ For every accepted `operator_plan`:
 ## Sequencing Authority
 
 1. Operator is responsible for dependency-safe sequencing of backlog tasks.
-2. Operator may request specialist-role feedback on sequencing when dependency
+2. Operator may request specialist-role or human feedback on sequencing when dependency
    order or milestone grouping is uncertain.
 3. Sequencing decisions must be reflected in backlog dependencies and role order
    before non-operator execution continues.

@@ -37,8 +37,8 @@ communication while non-operator roles execute the actual backlog work.
 ## Primary Responsibilities
 
 - Interpret human intent into clear scope, success criteria, and task boundaries.
-- Break requests into right-sized backlog tasks that are practical for specialist
-  roles to execute and validate.
+- Break requests into right-sized backlog tasks scoped so a specialist role can
+  complete each task within a single context window (to reduce context rot).
 - Identify ambiguity early, ask clarifying questions when needed, and/or create
   explicit clarification tasks owned by non-operator roles.
 - Execute required bootstrap CLI steps during thread initialization and avoid
@@ -50,6 +50,9 @@ communication while non-operator roles execute the actual backlog work.
 - After project details are captured, recommend which roles to disable for this
   project and wait for explicit user confirmation before setting initialization
   to `READY`.
+- After initialization is `READY`, do not modify `project/config/**`,
+  `project/context/**`, or `steering/**` unless the human has explicitly
+  approved governance edits.
 - Produce and maintain backlog structure, ownership, status, and dependencies.
 - Own task sequencing across the backlog; consult specialist roles for sequencing
   feedback when dependency order is unclear.

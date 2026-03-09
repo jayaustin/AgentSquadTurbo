@@ -183,6 +183,7 @@ execution:
   mode: sequential
   handoff_authority: operator-mediated
   selection_policy: dependency-fifo
+  unexpected_event_policy: errors-only
 backlog:
   statuses:
     - Todo
