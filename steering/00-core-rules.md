@@ -63,6 +63,6 @@ For Operator turns that produce plans, tasks, or governance decisions:
 
 1. Update canonical files first (for example `backlog.md` and context/spec docs).
 2. Confirm those writes succeeded.
-3. Regenerate dashboard snapshot (`py -3 -m runner.orchestrator render-dashboard`).
+3. Regenerate dashboard snapshot (`python -m runner.orchestrator render-dashboard`).
 4. Only then report completion to the user with a summary and reference
    `project/state/dashboard.html`.

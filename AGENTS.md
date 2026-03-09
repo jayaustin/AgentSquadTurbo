@@ -11,7 +11,7 @@ or
 do the following before any planning or task execution:
 
 1. Run:
-   - `py -3 -m runner.orchestrator bootstrap-operator --print-packet`
+   - `python -m runner.orchestrator bootstrap-operator --print-packet`
 2. Read:
    - `project/state/operator-bootstrap.md`
 3. Load all context files listed in that packet in order.
@@ -44,7 +44,7 @@ During normal operation, the Operator should ensure dashboard snapshots stay
 current for human visibility:
 
 1. Regenerate the dashboard via:
-   - `py -3 -m runner.orchestrator render-dashboard`
+   - `python -m runner.orchestrator render-dashboard`
 2. The generated artifact is:
    - `project/state/dashboard.html`
 3. If dashboard regeneration fails, treat it as non-blocking:

@@ -78,7 +78,7 @@ sequence before claiming completion:
 2. Verify writes succeeded and schema/format remains valid.
 3. Write/update run journal artifacts.
 4. Regenerate dashboard snapshot:
-   - `py -3 -m runner.orchestrator render-dashboard`
+   - `python -m runner.orchestrator render-dashboard`
 5. Respond with a file-based completion summary that references updated paths.
 
 Console/chat JSON output alone is not considered completion.
