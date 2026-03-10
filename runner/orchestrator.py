@@ -387,7 +387,7 @@ def _project_config_seed(role_definitions: dict[str, dict[str, Any]]) -> dict[st
         "project": {"id": "sample-project", "name": "Sample Project"},
         "host": {
             "primary_adapter": "codex",
-            "adapter_command": "codex --sandbox workspace-write --ask-for-approval never --ephemeral",
+            "adapter_command": "codex --sandbox workspace-write --ask-for-approval never exec --ephemeral",
             "session_mode": "stateless",
             "context_rot_guardrails": {
                 "max_turns_per_role_session": 8,

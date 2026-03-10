@@ -18,11 +18,51 @@ class CodexAdapter(BaseAdapter):
     adapter_id = "codex"
 
     @staticmethod
-    def _split_command(command: str) -> list[str]:
+    def _sanitize_exec_args(args: list[str]) -> list[str]:
+        """Remove exec args managed by the adapter runtime."""
+        cleaned: list[str] = []
+        skip_next = False
+        for token in args:
+            if skip_next:
+                skip_next = False
+                continue
+            # Adapter handles session routing and output plumbing.
+            if token in {"resume", "--json"}:
+                continue
+            if token == "--output-last-message":
+                skip_next = True
+                continue
+            cleaned.append(token)
+        return cleaned
+
+    @classmethod
+    def _split_command(cls, command: str) -> tuple[list[str], list[str]]:
         raw = (command or "").strip()
         if not raw or "REPLACE_WITH_LOCAL_ASSISTANT_COMMAND" in raw:
-            return ["codex"]
-        return shlex.split(raw, posix=(os.name != "nt"))
+            return ["codex"], []
+
+        tokens = shlex.split(raw, posix=(os.name != "nt"))
+        if not tokens:
+            return ["codex"], []
+
+        if "exec" in tokens:
+            exec_index = tokens.index("exec")
+            base_args = tokens[:exec_index]
+            exec_args = tokens[exec_index + 1 :]
+        else:
+            # Backward compatibility: if exec-only flags were placed before exec,
+            # move them to exec args.
+            base_args = []
+            exec_args = []
+            for token in tokens:
+                if token == "--ephemeral":
+                    exec_args.append(token)
+                    continue
+                base_args.append(token)
+
+        if not base_args:
+            base_args = ["codex"]
+        return base_args, cls._sanitize_exec_args(exec_args)
 
     @staticmethod
     def _parse_thread_id(stdout: str) -> str | None:
@@ -48,7 +88,7 @@ class CodexAdapter(BaseAdapter):
         prompt: str,
         session_id: str | None = None,
     ) -> InvocationResult:
-        args = self._split_command(command)
+        base_args, default_exec_args = self._split_command(command)
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".txt",
@@ -59,8 +99,9 @@ class CodexAdapter(BaseAdapter):
 
         try:
             if session_id:
-                cli_args = args + [
+                cli_args = base_args + [
                     "exec",
+                    *default_exec_args,
                     "resume",
                     "--json",
                     "--output-last-message",
@@ -69,8 +110,9 @@ class CodexAdapter(BaseAdapter):
                     prompt,
                 ]
             else:
-                cli_args = args + [
+                cli_args = base_args + [
                     "exec",
+                    *default_exec_args,
                     "--json",
                     "--output-last-message",
                     str(output_path),
