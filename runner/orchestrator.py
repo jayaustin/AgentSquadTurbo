@@ -103,9 +103,7 @@ ROLE_REVIEW_PENDING_ISSUE = (
     "project/config/project.yaml: roles.review_confirmed must be true after Operator "
     "presents role enable/disable recommendations and receives explicit user confirmation."
 )
-ROLE_REVIEW_DISABLE_DISPLAY_LIMIT = 30
-ROLE_REVIEW_KEEP_DISPLAY_LIMIT = 12
-ROLE_REVIEW_CORE_KEEP = {"operator", "product-manager", "technical-architect", "qa-manager"}
+ROLE_REVIEW_CORE_KEEP = {"operator"}
 UNEXPECTED_EVENT_POLICY_VALUES = {"errors-only", "errors-or-warnings", "proceed"}
 DEFAULT_UNEXPECTED_EVENT_POLICY = "errors-only"
 PROTECTED_GOVERNANCE_PATH_PREFIXES = (
@@ -1365,8 +1363,10 @@ def _role_review_recommendations(
         disable_candidates = low_overlap[:limit]
 
     keep_candidates = [
-        item for item in sorted(scored, key=lambda item: (-item["score"], item["role_id"])) if item["score"] > 0
-    ][:ROLE_REVIEW_KEEP_DISPLAY_LIMIT]
+        item
+        for item in sorted(scored, key=lambda item: (-item["score"], item["role_id"]))
+        if item["score"] > 0
+    ]
     return disable_candidates, keep_candidates
 
 
@@ -1393,6 +1393,15 @@ def _project_initialization_base_issues(root: Path, runtime: dict[str, Any]) -> 
     enabled_roles = roles.get("enabled", [])
     if not isinstance(enabled_roles, list) or not enabled_roles:
         issues.append("project/config/project.yaml: roles.enabled must include at least one role.")
+        enabled_roles = []
+    if "operator" not in enabled_roles:
+        issues.append("project/config/project.yaml: roles.enabled must include 'operator'.")
+    non_operator_enabled = [role_id for role_id in enabled_roles if str(role_id).strip() != "operator"]
+    if not non_operator_enabled:
+        issues.append(
+            "project/config/project.yaml: no non-operator roles are enabled. "
+            "AgentSquad requires Operator plus at least one non-operator role to execute work."
+        )
 
     context_values = _project_context_values(root)
     context_path = root / "project" / "context" / "project-context.md"
@@ -1581,8 +1590,7 @@ def _bootstrap_role_review_lines(
     if disable_recs:
         lines.append("### Suggested Roles To Disable")
         lines.append("")
-        display = disable_recs[:ROLE_REVIEW_DISABLE_DISPLAY_LIMIT]
-        for item in display:
+        for item in disable_recs:
             role_id = item["role_id"]
             score = item["score"]
             overlap = item.get("overlap", [])
@@ -1591,9 +1599,6 @@ def _bootstrap_role_review_lines(
             else:
                 reason = "no direct match to current project goals/deliverables/constraints"
             lines.append(f"- `{role_id}`: {reason}")
-        hidden = len(disable_recs) - len(display)
-        if hidden > 0:
-            lines.append(f"- ... plus `{hidden}` additional low-relevance roles.")
         lines.append("")
     else:
         lines.append(
@@ -2560,6 +2565,13 @@ def _prepare_runtime_or_exit(root: Path) -> dict[str, Any]:
         joined = "\n".join(f"- {item}" for item in errors)
         raise OrchestrationHalt(f"Validation failed before execution:\n{joined}")
     runtime = _runtime(root)
+    enabled_roles = set(runtime.get("enabled_roles", set()))
+    non_operator_enabled = {role_id for role_id in enabled_roles if role_id != "operator"}
+    if "operator" not in enabled_roles or not non_operator_enabled:
+        raise OrchestrationHalt(
+            "No executable specialist roles are enabled. "
+            "AgentSquad requires Operator plus at least one non-operator role."
+        )
     init_issues = _project_initialization_issues(root, runtime)
     if init_issues:
         joined = "\n".join(f"- {item}" for item in init_issues)

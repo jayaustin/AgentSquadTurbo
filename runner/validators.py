@@ -421,6 +421,22 @@ def _validate_project_config(config: dict[str, Any]) -> list[str]:
         errors.append("project config must include host.primary_adapter and host.adapter_command.")
     if not isinstance(roles, dict) or "enabled" not in roles or "disabled" not in roles:
         errors.append("project config must include roles.enabled and roles.disabled.")
+    if isinstance(roles, dict):
+        enabled_roles = roles.get("enabled", [])
+        if not isinstance(enabled_roles, list):
+            errors.append("roles.enabled must be a list.")
+            enabled_roles = []
+        if "operator" not in enabled_roles:
+            errors.append("roles.enabled must include 'operator'.")
+        non_operator_enabled = [role_id for role_id in enabled_roles if str(role_id).strip() != "operator"]
+        if not non_operator_enabled:
+            errors.append(
+                "roles.enabled must include at least one non-operator role. "
+                "Operator alone cannot execute project work."
+            )
+        disabled_roles = roles.get("disabled", [])
+        if not isinstance(disabled_roles, list):
+            errors.append("roles.disabled must be a list.")
     if isinstance(roles, dict) and "review_confirmed" in roles:
         if not isinstance(roles["review_confirmed"], bool):
             errors.append("roles.review_confirmed must be boolean when provided.")
