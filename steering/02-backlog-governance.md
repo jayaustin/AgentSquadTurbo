@@ -21,6 +21,10 @@
 9. Returning task JSON in chat/console without updating `backlog.md` is invalid.
 10. After backlog changes, refresh dashboard snapshot so `Tasks` view stays in sync.
 11. Any attempt to set `owner: operator` (by Operator or non-Operator roles) is invalid.
+12. Backlog tasks should target files/paths inside the current `AgentSquad`
+    repository root.
+13. If a request requires paths outside repository root, Operator must warn the
+    human about boundary/sandbox/audit risk before accepting that plan.
 
 ## Initialization and Backlog
 

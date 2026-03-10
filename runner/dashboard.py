@@ -219,25 +219,32 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
     tasks = backlog_store.read_backlog(root / "backlog.md")
     statuses = list(config.get("backlog", {}).get("statuses", []))
     status_counts = _backlog_status_counts(tasks, statuses)
+    all_known_roles = sorted(set(enabled_roles) | set(disabled_roles) | set(registry.keys()))
 
     configured_colors = dashboard_cfg.get("agent_colors", {})
     role_colors: dict[str, str] = {}
-    for role_id in sorted(set(enabled_roles) | set(disabled_roles) | set(registry.keys())):
+    for role_id in all_known_roles:
         configured = str(configured_colors.get(role_id, "")).strip()
         role_colors[role_id] = (
             configured
             if validators.HEX_COLOR_PATTERN.fullmatch(configured)
             else _fallback_color(role_id)
         )
+    role_display_names = {
+        role_id: registry.get(role_id, {}).get("display_name", role_id.replace("-", " ").title())
+        for role_id in all_known_roles
+    }
 
     global_log = _read_jsonl(root / "project" / "state" / "activity-log.jsonl")
     per_role_logs = {
         role_id: _read_jsonl(root / "project" / "workspaces" / role_id / "activity.jsonl")
-        for role_id in sorted(set(enabled_roles) | set(disabled_roles))
+        for role_id in all_known_roles
     }
 
+    enabled_set = set(enabled_roles)
+    disabled_set = set(disabled_roles)
     role_entries: list[dict[str, Any]] = []
-    for role_id in enabled_roles:
+    for role_id in all_known_roles:
         role_path = root / "agents" / "roles" / role_id / "agent-role.md"
         role_text = ""
         if role_path.exists():
@@ -247,10 +254,9 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
         role_entries.append(
             {
                 "role_id": role_id,
-                "display_name": registry.get(role_id, {}).get(
-                    "display_name", role_id.replace("-", " ").title()
-                ),
+                "display_name": role_display_names.get(role_id, role_id.replace("-", " ").title()),
                 "color": role_colors.get(role_id, _fallback_color(role_id)),
+                "enabled": bool(role_id in enabled_set and role_id not in disabled_set),
                 "role_context_html": _markdown_to_html(role_text),
                 "activity": per_role_logs.get(role_id, []),
             }
@@ -259,6 +265,9 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
     project_info = config.get("project", {})
     host_info = config.get("host", {})
     execution_info = config.get("execution", {})
+    guardrails = host_info.get("context_rot_guardrails", {})
+    if not isinstance(guardrails, dict):
+        guardrails = {}
     payload = {
         "generated_at_utc": datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S"),
         "repo_root_relative_prefix": repo_root_relative_prefix,
@@ -275,6 +284,7 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
             "selection_policy": execution_info.get("selection_policy", ""),
             "enabled_roles": enabled_roles,
             "disabled_roles": disabled_roles,
+            "role_display_names": role_display_names,
             "status_counts": status_counts,
             "state": {
                 "run_id": state.get("run_id", ""),
@@ -283,6 +293,48 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
                 "halted": bool(state.get("halted", False)),
                 "halt_reason": state.get("halt_reason", ""),
                 "current_request": state.get("current_request", ""),
+            },
+        },
+        "settings": {
+            "host": {
+                "primary_adapter": str(host_info.get("primary_adapter", "")).strip(),
+                "adapter_command": str(host_info.get("adapter_command", "")).strip(),
+                "session_mode": str(host_info.get("session_mode", "per-role-threads")).strip()
+                or "per-role-threads",
+                "context_rot_guardrails": {
+                    "max_turns_per_role_session": int(
+                        guardrails.get("max_turns_per_role_session", 8)
+                    ),
+                    "max_session_age_minutes": int(
+                        guardrails.get("max_session_age_minutes", 240)
+                    ),
+                    "force_reload_on_context_change": bool(
+                        guardrails.get("force_reload_on_context_change", True)
+                    ),
+                },
+            },
+            "execution": {
+                "mode": str(execution_info.get("mode", "sequential")).strip() or "sequential",
+                "handoff_authority": str(
+                    execution_info.get("handoff_authority", "operator-mediated")
+                ).strip()
+                or "operator-mediated",
+                "selection_policy": str(
+                    execution_info.get("selection_policy", "dependency-fifo")
+                ).strip()
+                or "dependency-fifo",
+                "unexpected_event_policy": str(
+                    execution_info.get("unexpected_event_policy", "errors-only")
+                ).strip()
+                or "errors-only",
+            },
+            "dashboard": {
+                "output_file": str(dashboard_cfg.get("output_file", "")).strip()
+                or "project/state/dashboard.html",
+                "refresh_policy": str(dashboard_cfg.get("refresh_policy", "")).strip()
+                or "after-every-step",
+                "failure_mode": str(dashboard_cfg.get("failure_mode", "")).strip()
+                or "non-blocking-log",
             },
         },
         "documents": _collect_documents(root, dashboard_cfg),

@@ -48,3 +48,12 @@ After an invocation returns a valid contract, Operator must execute writes in th
    `operator_plan`.
 2. If required project context fields are empty or placeholder values, halt.
 3. If mandatory config values are not project-specific, halt.
+
+## Workspace Scope Notes
+
+1. Invocation context, file snapshots, and write verification are designed around
+   repository-root files.
+2. When requests depend on sibling/parent directories outside the repository,
+   reliability and audit coverage can degrade.
+3. Operator should warn the human about this boundary and recommend moving target
+   project files into the `AgentSquad` workspace before planning.

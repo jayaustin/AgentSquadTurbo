@@ -38,26 +38,29 @@ To use this framework for a new project:
 1. Clone this repository into a new project directory.
 2. Confirm your IDE assistant is supported by a functional adapter in
    [`runner/adapters/`](runner/adapters/) (look for a real implementation, not a stub).
-3. Open the cloned folder in your IDE agent environment.
-4. Start a fresh IDE agent thread and use this short prompt:
+3. Keep project/product files you want agents to manage inside this cloned
+   `AgentSquad` directory (for example under `project/`, `docs/`, or another
+   in-repo folder).
+4. Open the cloned folder in your IDE agent environment.
+5. Start a fresh IDE agent thread and use this short prompt:
 
 ```text
 Read AGENTS.md and initialize this thread as AgentSquad Operator
 ```
 
-5. The IDE agent should run required bootstrap commands automatically:
+6. The IDE agent should run required bootstrap commands automatically:
    - generate `project/state/operator-bootstrap.md`
    - load and follow that packet
-6. Answer Operator initialization intake so it can update:
+7. Answer Operator initialization intake so it can update:
    - `project/context/project-context.md`
    - `project/config/project.yaml`
    - Optional but recommended: complete the deep-dive intake follow-up to provide
      richer detail on goals, users, constraints, deliverables, and acceptance criteria.
-7. Complete Operator role enablement review:
+8. Complete Operator role enablement review:
    - Operator proposes roles to disable (all roles are enabled by default)
    - You confirm one of: `apply-recommendations`, `keep-all`, or `custom`
    - Operator records confirmation in `project/config/project.yaml` (`roles.review_confirmed: true`)
-8. After initialization reaches `READY`, provide your first project request.
+9. After initialization reaches `READY`, provide your first project request.
 
 Note: in an ideal environment, users should not manually run bootstrap CLI
 steps. Initialization should be handled by the IDE agent thread.
@@ -160,6 +163,11 @@ File access behavior:
 - Operator is not the only writer.
 - Orchestrator still owns critical framework writes and validation pathways for
   backlog/state/log/dashboard consistency.
+- Keeping managed files outside the `AgentSquad` repository can cause access
+  failures under adapter sandbox defaults and can reduce audit visibility.
+- External-path workflows may require relaxed adapter flags (`--add-dir`,
+  sandbox bypass, approval changes), which increases safety and reproducibility
+  risk.
 - After initialization is `READY`, edits to `project/config/**`,
   `project/context/**`, and `steering/**` require explicit human approval.
 - Operator invocations force full context reload (no Operator session reuse) and

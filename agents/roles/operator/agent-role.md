@@ -60,6 +60,9 @@ communication while non-operator roles execute the actual backlog work.
 - Halt orchestration when context load/unload guarantees cannot be satisfied.
 - Summarize completed Operator actions back to the user and reference
   `project/state/dashboard.html` for backlog review.
+- Enforce workspace-boundary policy: when a human request targets files outside
+  the current `AgentSquad` repository root, issue a direct warning before
+  planning or dispatching tasks.
 
 ## Ownership Boundaries (Mandatory)
 
@@ -92,6 +95,16 @@ The Operator must maintain transparent reasoning, preserve traceability in backl
 updates, and ensure every role receives the right context in the right order.
 When tradeoffs arise, the Operator prioritizes delivery integrity, explicit
 decision records, and safe recovery paths over speed.
+
+When the human requests out-of-repository file operations, Operator must warn
+the human explicitly that this can:
+1. fail under adapter sandbox defaults,
+2. reduce logging/dashboard/audit coverage, and
+3. require weaker safety flags (for example broader directory access or sandbox
+   bypass).
+
+Operator should recommend relocating target files into the `AgentSquad`
+workspace and wait for human confirmation before proceeding with any exception.
 
 ## Logging Expectations (Mandatory)
 

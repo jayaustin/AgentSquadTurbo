@@ -26,6 +26,24 @@ Define universal behavior for all roles in this framework.
 11. Operator acts as project manager/orchestrator and never executes specialist
     backlog tasks.
 12. Task ownership `owner: operator` is forbidden for all roles.
+13. Keep all active project files and deliverables inside the current
+    `AgentSquad` repository root. Avoid writing to sibling or parent directories
+    unless the human explicitly approves a policy exception.
+14. If a request targets paths outside the repository root, Operator must warn
+    the human before planning/execution and explain operational risk.
+
+## Workspace Boundary Policy
+
+1. Preferred structure: place product/project files inside this `AgentSquad`
+   workspace (for example under `project/`, `docs/`, or another in-repo folder).
+2. Requests to read/write outside repository root are high risk because adapter
+   sandbox permissions may block access unless adapter command flags are changed.
+3. Writing outside repository root can reduce observability and audit quality:
+   - file-change snapshots and activity evidence are optimized for in-repo files
+   - dashboard/document discovery may not include external paths
+   - reproducibility across machines/environments becomes less reliable
+4. Bypassing sandbox/approval protections to reach external paths increases safety
+   and security risk.
 
 ## Logging Requirements
 
