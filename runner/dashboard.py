@@ -130,11 +130,15 @@ def _markdown_to_html(markdown_text: str) -> str:
     return "\n".join(out)
 
 
-def _read_jsonl(path: Path) -> list[dict[str, Any]]:
+def _read_jsonl(
+    path: Path,
+    *,
+    use_file_order_tiebreak: bool = False,
+) -> list[dict[str, Any]]:
     if not path.exists():
         return []
     entries: list[dict[str, Any]] = []
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for index, line in enumerate(path.read_text(encoding="utf-8").splitlines()):
         raw = line.strip()
         if not raw:
             continue
@@ -143,8 +147,21 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
         except json.JSONDecodeError:
             continue
         if isinstance(parsed, dict):
+            if use_file_order_tiebreak:
+                parsed["_line_index"] = index
             entries.append(parsed)
-    entries.sort(key=lambda item: str(item.get("ts_utc", "")), reverse=True)
+    if use_file_order_tiebreak:
+        entries.sort(
+            key=lambda item: (
+                str(item.get("ts_utc", "")),
+                int(item.get("_line_index", -1)),
+            ),
+            reverse=True,
+        )
+        for item in entries:
+            item.pop("_line_index", None)
+    else:
+        entries.sort(key=lambda item: str(item.get("ts_utc", "")), reverse=True)
     return entries
 
 
@@ -257,7 +274,10 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
         for role_id in all_known_roles
     }
 
-    global_log = _read_jsonl(root / "project" / "state" / "activity-log.jsonl")
+    global_log = _read_jsonl(
+        root / "project" / "state" / "activity-log.jsonl",
+        use_file_order_tiebreak=True,
+    )
     per_role_logs = {
         role_id: _read_jsonl(root / "project" / "workspaces" / role_id / "activity.jsonl")
         for role_id in all_known_roles
