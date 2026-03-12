@@ -644,6 +644,162 @@
       display: grid;
       gap: 9px;
     }
+    .activity-live {
+      border: 1px solid var(--border);
+      background: #0f172a;
+      border-radius: 10px;
+      padding: 10px;
+      margin-bottom: 12px;
+      display: grid;
+      gap: 8px;
+    }
+    .activity-live h3 {
+      margin: 0;
+      color: #dbeafe;
+      font-size: 0.95rem;
+    }
+    .activity-live-list {
+      display: grid;
+      gap: 7px;
+    }
+    .activity-live-row {
+      border: 1px solid #22304c;
+      background: rgba(2, 6, 23, 0.55);
+      border-left-width: 5px;
+      border-radius: 8px;
+      padding: 8px 10px;
+      display: grid;
+      gap: 3px;
+    }
+    .activity-live-head {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .activity-live-role {
+      font-weight: 700;
+      color: #dbeafe;
+    }
+    .activity-live-task {
+      color: #bfdbfe;
+      font-size: 0.84rem;
+      font-family: Consolas, "Courier New", monospace;
+    }
+    .activity-live-meta {
+      color: var(--muted);
+      font-size: 0.78rem;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 12px;
+    }
+    .activity-group-list {
+      gap: 8px;
+    }
+    .activity-group {
+      border: 1px solid var(--border);
+      background: #0f172a;
+      border-left-width: 5px;
+      border-radius: 10px;
+      overflow: hidden;
+    }
+    .activity-group-head {
+      background: rgba(30, 41, 59, 0.45);
+      border-bottom: 1px solid #22304c;
+      padding: 8px 10px;
+      display: grid;
+      gap: 5px;
+    }
+    .activity-group-topline {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+      justify-content: space-between;
+    }
+    .activity-group-role {
+      border-radius: 999px;
+      padding: 3px 9px;
+      font-size: 0.76rem;
+      font-weight: 700;
+      color: #0b1220;
+    }
+    .activity-group-task {
+      color: #dbeafe;
+      font-weight: 600;
+      font-size: 0.85rem;
+    }
+    .activity-group-count {
+      color: var(--muted);
+      font-size: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.03em;
+    }
+    .activity-group-time {
+      color: var(--muted);
+      font-size: 0.75rem;
+    }
+    .activity-group-body {
+      display: grid;
+    }
+    .activity-line {
+      display: grid;
+      grid-template-columns: 165px 1fr;
+      gap: 10px;
+      padding: 7px 10px;
+      border-bottom: 1px solid #1f2a44;
+      align-items: start;
+    }
+    .activity-line:last-child {
+      border-bottom: 0;
+    }
+    .activity-line.error {
+      background: rgba(127, 29, 29, 0.2);
+    }
+    .activity-line.warning {
+      background: rgba(124, 74, 3, 0.16);
+    }
+    .activity-line-time {
+      color: var(--muted);
+      font-size: 0.75rem;
+      font-family: Consolas, "Courier New", monospace;
+      white-space: nowrap;
+    }
+    .activity-line-main {
+      min-width: 0;
+    }
+    .activity-line-summary {
+      margin: 0;
+      font-size: 0.86rem;
+      line-height: 1.38;
+      overflow-wrap: anywhere;
+    }
+    .activity-line-meta {
+      margin-top: 2px;
+      color: var(--muted);
+      font-size: 0.74rem;
+      overflow-wrap: anywhere;
+    }
+    .activity-line-badge {
+      display: inline-block;
+      margin-right: 6px;
+      border-radius: 999px;
+      padding: 1px 7px;
+      font-size: 0.67rem;
+      font-weight: 700;
+      letter-spacing: 0.02em;
+      text-transform: uppercase;
+      vertical-align: middle;
+    }
+    .activity-line-badge.error {
+      background: #dc2626;
+      color: #fee2e2;
+    }
+    .activity-line-badge.warning {
+      background: #d97706;
+      color: #ffedd5;
+    }
     .event {
       border: 1px solid var(--border);
       background: #0f172a;
@@ -880,6 +1036,13 @@
       .agent-panel {
         max-height: none;
       }
+      .activity-line {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+      .activity-line-time {
+        white-space: normal;
+      }
     }
   </style>
 </head>
@@ -924,7 +1087,8 @@
 
     <section class="tab-panel" id="tab-activity">
       <div class="panel-pad">
-        <div class="timeline" id="activity-log"></div>
+        <section class="activity-live" id="activity-live-summary"></section>
+        <div class="timeline activity-group-list" id="activity-log"></div>
       </div>
     </section>
 
@@ -2942,14 +3106,238 @@
       ].join("");
     }
 
+    function entryMetadata(entry) {
+      if (!entry || typeof entry !== "object") {
+        return {};
+      }
+      return entry.metadata && typeof entry.metadata === "object" ? entry.metadata : {};
+    }
+
+    function buildActiveAgentRows(events, state) {
+      const activeByRole = {};
+      const latestByRole = {};
+      const latestTaskByRole = {};
+      const chronological = (events || []).slice().reverse();
+
+      chronological.forEach(entry => {
+        const roleId = String(entry.role_id || "").trim();
+        const taskId = String(entry.task_id || "").trim();
+        const eventType = String(entry.event_type || "").trim().toLowerCase();
+        const ts = String(entry.ts_utc || "").trim();
+        const metadata = entryMetadata(entry);
+
+        if (roleId) {
+          if (ts) {
+            latestByRole[roleId] = ts;
+          }
+          if (taskId) {
+            latestTaskByRole[roleId] = taskId;
+          }
+          if (activeByRole[roleId]) {
+            if (ts) {
+              activeByRole[roleId].last_activity_at_utc = ts;
+            }
+            if (!activeByRole[roleId].task_id && taskId) {
+              activeByRole[roleId].task_id = taskId;
+            }
+          }
+        }
+
+        if (eventType === "operator_role_invoke") {
+          const targetRole = String(metadata.target_role || "").trim();
+          if (targetRole) {
+            activeByRole[targetRole] = {
+              role_id: targetRole,
+              task_id: taskId,
+              started_at_utc: ts,
+              last_activity_at_utc: ts
+            };
+          }
+          return;
+        }
+
+        if (eventType === "operator_role_return") {
+          const targetRole = String(metadata.target_role || "").trim();
+          if (targetRole && activeByRole[targetRole]) {
+            const activeTaskId = String(activeByRole[targetRole].task_id || "").trim();
+            if (!taskId || !activeTaskId || activeTaskId === taskId) {
+              delete activeByRole[targetRole];
+            }
+          }
+        }
+      });
+
+      const activeRole = String((state && state.active_role) || "").trim();
+      if (activeRole && activeRole !== "operator" && !activeByRole[activeRole]) {
+        activeByRole[activeRole] = {
+          role_id: activeRole,
+          task_id: String(latestTaskByRole[activeRole] || "").trim(),
+          started_at_utc: String(latestByRole[activeRole] || "").trim(),
+          last_activity_at_utc: String(latestByRole[activeRole] || "").trim()
+        };
+      }
+
+      let operatorTaskId = "";
+      if (activeRole && activeRole !== "operator" && activeByRole[activeRole]) {
+        operatorTaskId = String(activeByRole[activeRole].task_id || "").trim();
+      }
+      if (!operatorTaskId) {
+        operatorTaskId = String(latestTaskByRole.operator || "").trim();
+      }
+
+      const runStartedAt = String((state && state.run_id) || "").trim();
+      const operatorLatestAt = String(latestByRole.operator || "").trim();
+      const operatorRow = {
+        role_id: "operator",
+        task_id: operatorTaskId,
+        started_at_utc: runStartedAt || operatorLatestAt,
+        last_activity_at_utc: operatorLatestAt || runStartedAt
+      };
+
+      const roleRows = Object.values(activeByRole)
+        .filter(row => String(row.role_id || "").trim() && String(row.role_id).trim() !== "operator")
+        .sort((left, right) => {
+          const leftName = roleDisplayName(DATA.project, left.role_id);
+          const rightName = roleDisplayName(DATA.project, right.role_id);
+          return leftName.localeCompare(rightName, undefined, { sensitivity: "base", numeric: true });
+        });
+
+      return [operatorRow, ...roleRows];
+    }
+
+    function activityLiveRowHtml(row) {
+      const roleId = String(row.role_id || "").trim() || "unknown";
+      const roleName = roleDisplayName(DATA.project, roleId);
+      const taskId = String(row.task_id || "").trim();
+      const startedText = row.started_at_utc
+        ? formatLocalTimestamp(row.started_at_utc)
+        : "N/A";
+      const latestText = row.last_activity_at_utc
+        ? formatLocalTimestamp(row.last_activity_at_utc)
+        : "N/A";
+      return [
+        '<article class="activity-live-row" style="border-left-color:' + roleColor(roleId) + ';">',
+        '<div class="activity-live-head">',
+        '<span class="activity-live-role">' + esc(roleName) + " (" + esc(roleId) + ")" + "</span>",
+        '<span class="activity-live-task">' + esc(taskId ? "Task " + taskId : "No active task") + "</span>",
+        "</div>",
+        '<div class="activity-live-meta">',
+        '<span>Started: ' + esc(startedText) + "</span>",
+        '<span>Latest Activity: ' + esc(latestText) + "</span>",
+        "</div>",
+        "</article>"
+      ].join("");
+    }
+
+    function renderActivityLiveSummary(events) {
+      const root = document.getElementById("activity-live-summary");
+      const statusModel = computeHeaderStatusModel();
+      const state = (DATA.project && DATA.project.state) ? DATA.project.state : {};
+      const runningNow = statusModel.className === "status-orchestration-running";
+      if (!runningNow) {
+        root.innerHTML = "<h3>Currently Running Agents</h3>" +
+          '<p class="empty">No agents are actively running right now.</p>';
+        return;
+      }
+
+      const rows = buildActiveAgentRows(events, state);
+      root.innerHTML = "<h3>Currently Running Agents</h3>" +
+        '<div class="activity-live-list">' +
+        rows.map(activityLiveRowHtml).join("") +
+        "</div>";
+    }
+
+    function groupConsecutiveActivity(events) {
+      const groups = [];
+      let current = null;
+      events.forEach(entry => {
+        const roleId = String(entry.role_id || "").trim() || "unknown";
+        const taskId = String(entry.task_id || "").trim();
+        const key = roleId + "::" + taskId;
+        if (!current || current.key !== key) {
+          current = {
+            key,
+            role_id: roleId,
+            task_id: taskId,
+            entries: []
+          };
+          groups.push(current);
+        }
+        current.entries.push(entry);
+      });
+      return groups;
+    }
+
+    function activityLineHtml(entry) {
+      const severity = eventSeverity(entry);
+      const badge = severity === "error"
+        ? '<span class="activity-line-badge error">Error</span>'
+        : (severity === "warning" ? '<span class="activity-line-badge warning">Warning</span>' : "");
+      const eventType = String(entry.event_type || "event").trim() || "event";
+      const status = String(entry.status || "").trim();
+      const task = String(entry.task_id || "").trim();
+      const metaParts = [eventType];
+      if (task) {
+        metaParts.push("Task " + task);
+      }
+      if (status) {
+        metaParts.push(status);
+      }
+      const runJournal = resolveKnownPath(entry.run_journal_path || "");
+      const runJournalHtml = runJournal ? " | Journal " + fileLinkHtml(runJournal, runJournal) : "";
+      const summary = entry.summary || eventType || "Activity event";
+
+      return [
+        '<div class="activity-line ' + severity + '">',
+        '<div class="activity-line-time">' + esc(formatLocalTimestamp(entry.ts_utc || "")) + "</div>",
+        '<div class="activity-line-main">',
+        '<div class="activity-line-summary">' + badge + linkifyProjectFiles(summary) + "</div>",
+        '<div class="activity-line-meta">' + linkifyProjectFiles(metaParts.join(" | ")) + runJournalHtml + "</div>",
+        "</div>",
+        "</div>"
+      ].join("");
+    }
+
+    function activityGroupHtml(group) {
+      const roleId = String(group.role_id || "unknown");
+      const entries = Array.isArray(group.entries) ? group.entries : [];
+      const latestEntry = entries[0] || {};
+      const oldestEntry = entries[entries.length - 1] || latestEntry;
+      const countLabel = entries.length === 1 ? "1 event" : (entries.length + " events");
+      const timeLabel = entries.length > 1
+        ? (formatLocalTimestamp(latestEntry.ts_utc || "") + " -> " + formatLocalTimestamp(oldestEntry.ts_utc || ""))
+        : formatLocalTimestamp(latestEntry.ts_utc || "");
+      const taskLabel = String(group.task_id || "").trim()
+        ? "Task " + String(group.task_id).trim()
+        : "No task";
+
+      return [
+        '<article class="activity-group" style="border-left-color:' + roleColor(roleId) + ';">',
+        '<header class="activity-group-head">',
+        '<div class="activity-group-topline">',
+        '<span class="activity-group-role" style="background:' + roleColor(roleId) + '">' + esc(roleDisplayName(DATA.project, roleId)) + "</span>",
+        '<span class="activity-group-task">' + esc(taskLabel) + "</span>",
+        '<span class="activity-group-count">' + esc(countLabel) + "</span>",
+        "</div>",
+        '<div class="activity-group-time">' + esc(timeLabel) + "</div>",
+        "</header>",
+        '<div class="activity-group-body">',
+        entries.map(activityLineHtml).join(""),
+        "</div>",
+        "</article>"
+      ].join("");
+    }
+
     function renderActivity() {
-      const root = document.getElementById("activity-log");
       const events = DATA.activity_log || [];
+      renderActivityLiveSummary(events);
+      const root = document.getElementById("activity-log");
       if (!events.length) {
         root.innerHTML = '<p class="empty">No activity yet. Events appear here after orchestrator runs.</p>';
         return;
       }
-      root.innerHTML = events.map(eventHtml).join("");
+      const groupedEvents = groupConsecutiveActivity(events);
+      root.innerHTML = groupedEvents.map(activityGroupHtml).join("");
     }
 
     function renderAgentPanel(agent) {
