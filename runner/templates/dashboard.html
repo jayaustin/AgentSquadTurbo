@@ -364,7 +364,7 @@
     }
     .init-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      grid-template-columns: 1fr;
       gap: 10px;
     }
     .init-field {
@@ -407,6 +407,16 @@
       border-radius: 6px;
       padding: 7px 11px;
       cursor: pointer;
+    }
+    .init-actions .init-submit-btn {
+      background: #2563eb;
+      border-color: #1d4ed8;
+      color: #eff6ff;
+      font-weight: 700;
+      box-shadow: 0 0 0 1px rgba(191, 219, 254, 0.35) inset;
+    }
+    .init-actions .init-submit-btn:hover {
+      background: #1d4ed8;
     }
     .init-errors {
       margin: 0;
@@ -1463,7 +1473,11 @@
       root.innerHTML = [
         '<section class="init-panel">',
         "<h3>Project Initialization</h3>",
-        '<p class="settings-hint">Enter project details before opening your IDE Operator thread.</p>',
+        '<ol class="settings-hint">' +
+          "<li>Fill out all required fields on this page and click <strong>Submit Project Details</strong>.</li>" +
+          "<li>Optional: review additional settings and agent enable/disable in the <a href=\"#\" id=\"init-settings-link\">Project tab</a>.</li>" +
+          "<li>Open your IDE agent thread and use the initialization prompt shown below.</li>" +
+        "</ol>",
         serverHint ? '<p class="settings-hint">' + esc(serverHint) + "</p>" : "",
         (init.is_ready && !missing.length)
           ? '<div class="settings-validation ok">Required project details are complete.</div>'
@@ -1489,7 +1503,7 @@
           ? ('<ul class="init-errors">' + errors.map(item => "<li>" + esc(item) + "</li>").join("") + "</ul>")
           : "",
         '<div class="init-actions">',
-        '<button type="button" id="init-submit-btn">Submit Project Details</button>',
+        '<button type="button" class="init-submit-btn" id="init-submit-btn">Submit Project Details</button>',
         '<button type="button" id="init-open-project-btn">Open Settings & Agents</button>',
         '<span class="settings-copy-status" id="init-submit-status"></span>',
         "</div>",
@@ -1503,6 +1517,7 @@
       ].join("");
 
       const submitButton = document.getElementById("init-submit-btn");
+      const settingsLink = document.getElementById("init-settings-link");
       const openProjectButton = document.getElementById("init-open-project-btn");
       const copyPromptButton = document.getElementById("init-copy-prompt-btn");
       const submitStatus = document.getElementById("init-submit-status");
@@ -1516,6 +1531,13 @@
       }
       if (openProjectButton) {
         openProjectButton.addEventListener("click", () => {
+          activeTab = "project";
+          renderTabs();
+        });
+      }
+      if (settingsLink) {
+        settingsLink.addEventListener("click", event => {
+          event.preventDefault();
           activeTab = "project";
           renderTabs();
         });

@@ -641,8 +641,11 @@ def _build_handler(state: ServerState) -> type[BaseHTTPRequestHandler]:
                     try:
                         event = subscriber.get(timeout=SSE_HEARTBEAT_SECONDS)
                     except queue.Empty:
-                        self.wfile.write(b": ping\n\n")
-                        self.wfile.flush()
+                        try:
+                            self.wfile.write(b": ping\n\n")
+                            self.wfile.flush()
+                        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                            break
                         continue
                     event_name = str(event.get("event", "message"))
                     payload = {
@@ -650,12 +653,15 @@ def _build_handler(state: ServerState) -> type[BaseHTTPRequestHandler]:
                         "ts_utc": event.get("ts_utc"),
                         "payload": event.get("payload", {}),
                     }
-                    self.wfile.write(f"event: {event_name}\n".encode("utf-8"))
-                    self.wfile.write(
-                        f"data: {json.dumps(payload, ensure_ascii=True)}\n\n".encode("utf-8")
-                    )
-                    self.wfile.flush()
-            except (BrokenPipeError, ConnectionResetError):
+                    try:
+                        self.wfile.write(f"event: {event_name}\n".encode("utf-8"))
+                        self.wfile.write(
+                            f"data: {json.dumps(payload, ensure_ascii=True)}\n\n".encode("utf-8")
+                        )
+                        self.wfile.flush()
+                    except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+                        break
+            except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
                 return
             finally:
                 state.broker.unsubscribe(subscriber)
@@ -882,6 +888,8 @@ def run_server(root: Path, host: str, port: int) -> int:
 
     print(f"AgentSquad local server running at http://{host}:{port}")
     print(f"Repository root: {root.as_posix()}")
+    print("Now open that URL in your browser and complete the Initialize tab steps.")
+    print("After submitting project details, optionally tune settings/agents, then initialize Operator in your IDE.")
     try:
         server.serve_forever(poll_interval=0.5)
     except KeyboardInterrupt:
