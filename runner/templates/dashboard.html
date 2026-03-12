@@ -1427,7 +1427,16 @@
         renderInitialization();
         return;
       }
-      const errors = initValidationErrors();
+      const payload = initPayloadFromUI();
+      const errors = initValidationErrors({
+        project_id: payload.project.id,
+        project_name: payload.project.name,
+        project_goals: payload.context.project_goals,
+        target_users: payload.context.target_users,
+        key_constraints: payload.context.key_constraints,
+        primary_deliverables: payload.context.primary_deliverables,
+        acceptance_criteria: payload.context.acceptance_criteria
+      });
       if (errors.length) {
         initStatusText = "Fix required fields before submitting initialization.";
         renderInitialization();
@@ -1443,7 +1452,7 @@
           headers: {
             "Content-Type": "application/json"
           },
-          body: JSON.stringify(initPayloadFromUI())
+          body: JSON.stringify(payload)
         });
         initStatusText = "Project details saved. You can now initialize Operator in your IDE.";
         await refreshDashboardData();
