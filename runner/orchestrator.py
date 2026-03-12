@@ -446,7 +446,20 @@ def seed_scaffold(root: Path) -> list[Path]:
     project_context_path = root / "project" / "context" / "project-context.md"
     if _write_if_missing(
         project_context_path,
-        "# Project Context\n\nUse this file for project-specific context shared by all roles.\n",
+        (
+            "This file tracks project specific context that is shared across all agent roles as the orchestration engine runs. "
+            'This file must be initialized before orchestration can begin. To modify project context later, use the "Project" tab.\n\n'
+            "## Summary\n\n"
+            "- Project goals:\n"
+            "- Target users:\n"
+            "- Key constraints:\n"
+            "- Non-goals:\n\n"
+            "## Deliverables\n\n"
+            "- Primary deliverables:\n"
+            "- Acceptance criteria:\n\n"
+            "## Notes\n\n"
+            "Add evolving context here as work progresses.\n"
+        ),
     ):
         created.append(project_context_path)
 

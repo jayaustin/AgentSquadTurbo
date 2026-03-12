@@ -267,9 +267,7 @@ def _format_context_markdown(values: dict[str, str], notes: str) -> str:
     if not notes_text:
         notes_text = "Add evolving context here as work progresses."
     lines = [
-        "# Project Context",
-        "",
-        "Use this file to capture project-specific context shared across all roles.",
+        'This file tracks project specific context that is shared across all agent roles as the orchestration engine runs. This file must be initialized before orchestration can begin. To modify project context later, use the "Project" tab.',
         "",
         "## Summary",
         "",
