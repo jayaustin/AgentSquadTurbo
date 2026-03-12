@@ -76,8 +76,8 @@ steps. Initialization should be handled by the IDE agent thread.
 
 AgentSquad runs a local Python dashboard server with live updates. The dashboard includes:
 
-- `Initialize`: project-details form for first-run setup before IDE initialization
-- `Project`: project summary, execution policy, role counts, state/halt info
+- `Project`: project-details form for first-run setup before IDE initialization
+- `Settings`: project summary, execution policy, role counts, state/halt info
 - `Documents`: browser-friendly rendering of included markdown deliverables
 - `Tasks`: backlog table with sort/filter controls and live updates
 - `Activity Log`: global timeline across all roles with live updates
@@ -102,7 +102,156 @@ Optional static export path (for offline snapshot sharing):
 
 - `project/state/dashboard.html`
 
-## 4. CLI
+## 4. Settings Reference
+
+This section documents the settings editable in the **Settings** tab.
+
+### 4.1 Role Controls
+
+- `roles.enabled` / `roles.disabled`
+  - Type: list of role IDs
+  - Purpose: controls which specialist agents are available for orchestration.
+  - Behavior:
+    - Roles in `enabled` and not in `disabled` are selectable owners for tasks.
+    - Roles in `disabled` are excluded from execution selection.
+    - `operator` is required and cannot be disabled.
+
+### 4.2 Host Settings
+
+- `host.primary_adapter`
+  - Type: string enum
+  - UI values:
+    - `antigravity`
+    - `claude-code`
+    - `cline`
+    - `codex`
+    - `continue`
+    - `cursor`
+    - `gemini-code-assist`
+    - `github-copilot`
+    - `kiro`
+    - `roo`
+    - `windsurf`
+  - Purpose: selects which adapter implementation the orchestrator uses for role invocations.
+  - Current practical support:
+    - functional: `codex`
+    - others are registered but stubbed unless you implement the adapter.
+
+- `host.adapter_command`
+  - Type: string (required)
+  - Purpose: shell command used to invoke the selected adapter.
+  - Scope note:
+    - The flag guidance below is for `host.primary_adapter: codex`.
+    - Other adapter providers may use different flag names and invocation semantics.
+  - Behavior:
+    - must be non-empty.
+    - incorrect command/value will cause invocation failures and possible orchestration halt.
+  - How `exec` is handled in AgentSquadTurbo (`codex` adapter):
+    - If your string includes `exec`, everything before `exec` is treated as base command args and everything after `exec` is treated as default exec args.
+    - If your string omits `exec`, AgentSquadTurbo inserts `exec` automatically at runtime.
+    - Backward compatibility: if `--ephemeral` is placed before `exec`, the adapter moves it into exec-args position.
+    - Runtime-managed flags (`resume`, `--json`, `--output-last-message`) are appended by the adapter and should not be manually embedded in `host.adapter_command`.
+  - Project default string:
+    - `codex --sandbox workspace-write --ask-for-approval never exec --ephemeral`
+    - What it does:
+      - `codex`: selects the Codex CLI executable.
+      - `--sandbox workspace-write`: allows file writes inside the workspace/repo.
+      - `--ask-for-approval never`: disables interactive approval prompts.
+      - `exec`: runs in non-interactive execution mode.
+      - `--ephemeral`: uses ephemeral sessions for role invocations.
+  - Common flags you may use (Codex-style):
+    - `--sandbox workspace-write`: workspace-limited editing.
+    - `--ask-for-approval never`: unattended operation without approval prompts.
+    - `exec`: explicit split point between base args and exec args.
+    - `--ephemeral`: fresh/ephemeral execution sessions.
+    - `--add-dir <path>`: grants adapter access to an additional directory outside the repo.
+    - `--dangerously-bypass-approvals-and-sandbox`: disables sandboxing and approvals entirely (extremely dangerous; use only in externally sandboxed environments).
+  - Complete example command strings:
+    - Default project command:
+      - `codex --sandbox workspace-write --ask-for-approval never exec --ephemeral`
+    - Same style with extra external directory access:
+      - `codex --sandbox workspace-write --ask-for-approval never exec --ephemeral --add-dir ../shared-specs`
+    - Backward-compatible style (no explicit `exec`; runtime inserts it):
+      - `codex --sandbox workspace-write --ask-for-approval never --ephemeral`
+    - Minimal explicit exec form (less constrained than default):
+      - `codex exec --ephemeral`
+    - Dangerous full-bypass example (not recommended):
+      - `codex --dangerously-bypass-approvals-and-sandbox exec --ephemeral`
+
+- `host.session_mode`
+  - Type: string enum
+  - Values:
+    - `per-role-threads`: preserves thread/session continuity per role.
+    - `stateless`: treats each invocation as isolated.
+  - Purpose: controls context/session persistence strategy.
+
+- `host.context_rot_guardrails.max_turns_per_role_session`
+  - Type: integer > 0
+  - Purpose: forces session turnover after N turns per role to limit stale-context drift.
+
+- `host.context_rot_guardrails.max_session_age_minutes`
+  - Type: integer > 0
+  - Purpose: forces session turnover after time threshold to reduce long-lived context drift.
+
+- `host.context_rot_guardrails.force_reload_on_context_change`
+  - Type: boolean
+  - Values:
+    - `true`: reloads role context manifest when context inputs change.
+    - `false`: allows reuse without forced reload on context-file updates.
+  - Purpose: controls strictness of context freshness.
+
+### 4.3 Execution Settings
+
+- `execution.mode`
+  - Type: string enum
+  - Value:
+    - `sequential`
+  - Purpose: defines global orchestration execution style.
+  - Note: current framework constrains execution to sequential mode.
+
+- `execution.handoff_authority`
+  - Type: string enum
+  - Value:
+    - `operator-mediated`
+  - Purpose: requires Operator to coordinate/mediate handoff and task planning updates.
+
+- `execution.selection_policy`
+  - Type: string enum
+  - Value:
+    - `dependency-fifo`
+  - Purpose: selects the next executable task based on dependency satisfaction and FIFO order.
+
+- `execution.unexpected_event_policy`
+  - Type: string enum
+  - Values:
+    - `errors-only`: continue through warnings, halt on errors.
+    - `errors-or-warnings`: halt on warnings and errors.
+    - `proceed`: continue despite warnings/errors unless another hard-stop condition triggers.
+  - Purpose: controls strictness when unexpected events are emitted by role execution.
+
+### 4.4 Dashboard Settings
+
+- `dashboard.output_file`
+  - Type: string path (required)
+  - Purpose: target path for static dashboard rendering output.
+  - Typical value:
+    - `project/state/dashboard.html`
+
+- `dashboard.refresh_policy`
+  - Type: string enum
+  - Value:
+    - `after-every-step`
+  - Purpose: controls snapshot refresh cadence for static dashboard output.
+
+- `dashboard.failure_mode`
+  - Type: string enum
+  - Value:
+    - `non-blocking-log`
+  - Purpose: controls how dashboard write failures are handled.
+  - Behavior:
+    - logs warning/failure without hard-stopping orchestration.
+
+## 5. CLI
 
 Recommended npm commands from repository root:
 
@@ -131,7 +280,7 @@ These commands are intentionally available for manual control/troubleshooting.
 In an ideal setup, most invocation is performed by Operator and role agents, not
 the human.
 
-## 5. Host Adapter
+## 6. Host Adapter
 
 This framework was built and tested using OpenAI Codex CLI as the host adapter.
 It can theoretically work with other providers if they support similar
@@ -156,7 +305,7 @@ The runner passes prompt data through:
 - `STDIN`
 - `AGENTSQUAD_PROMPT` environment variable
 
-## 6. Threaded Role Sessions
+## 7. Threaded Role Sessions
 
 AgentSquad supports persistent per-role threads so context is not rebuilt from
 scratch every turn.
@@ -194,7 +343,7 @@ File access behavior:
 - Operator invocations force full context reload (no Operator session reuse) and
   emit explicit `context_reload` log events to reduce context-rot risk.
 
-## 7. Validation Guarantees
+## 8. Validation Guarantees
 
 Validation and runtime guardrails are designed to keep orchestration safe,
 deterministic, and auditable.

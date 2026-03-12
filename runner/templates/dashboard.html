@@ -50,6 +50,19 @@
       font-size: 0.9rem;
       text-align: right;
     }
+    .top-warning-banner {
+      display: none;
+      margin-bottom: 10px;
+      border: 1px solid #dc2626;
+      background: rgba(127, 29, 29, 0.35);
+      color: #fecaca;
+      border-radius: 10px;
+      padding: 9px 12px;
+      font-weight: 600;
+    }
+    .top-warning-banner.visible {
+      display: block;
+    }
     .status-indicator {
       display: inline-flex;
       align-items: center;
@@ -327,11 +340,16 @@
       padding: 8px;
       display: grid;
       gap: 5px;
+      min-width: 0;
     }
     .settings-field label {
+      display: block;
       font-size: 0.86rem;
       color: #cbd5e1;
       font-weight: 600;
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .settings-field input,
     .settings-field select {
@@ -342,11 +360,18 @@
       padding: 7px 8px;
       width: 100%;
       font-family: inherit;
+      min-width: 0;
+      box-sizing: border-box;
     }
     .settings-hint {
       color: var(--muted);
       font-size: 0.78rem;
       line-height: 1.35;
+    }
+    .settings-hint code {
+      white-space: normal;
+      overflow-wrap: anywhere;
+      word-break: break-word;
     }
     .settings-validation {
       margin-top: 10px;
@@ -864,6 +889,7 @@
       <h1>AgentSquad Dashboard</h1>
       <div class="meta" id="header-meta"></div>
     </div>
+    <div class="top-warning-banner" id="top-warning-banner" role="alert" aria-live="polite"></div>
     <div class="top-tabs" id="top-tabs"></div>
 
     <section class="tab-panel" id="tab-init">
@@ -1029,6 +1055,7 @@
     let sortDir = "asc";
     let initSubmitInFlight = false;
     let initStatusText = "";
+    let topWarningText = "";
 
     function esc(text) {
       return String(text ?? "")
@@ -1051,6 +1078,26 @@
       } catch (error) {
         return;
       }
+    }
+
+    function renderTopWarning() {
+      const root = document.getElementById("top-warning-banner");
+      if (!root) {
+        return;
+      }
+      const text = String(topWarningText || "").trim();
+      if (!text) {
+        root.classList.remove("visible");
+        root.textContent = "";
+        return;
+      }
+      root.classList.add("visible");
+      root.textContent = text;
+    }
+
+    function setTopWarning(text) {
+      topWarningText = String(text || "").trim();
+      renderTopWarning();
     }
 
     function readOpenAgentGroups() {
@@ -2005,6 +2052,7 @@
       return [
         '<section class="project-settings">',
         "<h3>Project Settings</h3>",
+        '<p class="settings-hint"><a href="#" id="project-settings-readme-link">Read about the settings in the AgentSquadTurbo README</a></p>',
         '<div class="settings-grid">',
 
         '<div class="settings-field">',
@@ -2504,6 +2552,13 @@
           if (!roleId || !getProjectRoleIds().includes(roleId)) {
             return;
           }
+          if (roleId === "operator") {
+            CURRENT_ROLE_SELECTION[roleId] = true;
+            refreshProjectRoleToggleStates();
+            setTopWarning("Operator cannot be disabled. AgentSquad requires Operator to coordinate orchestration.");
+            validateProjectSettingsUI();
+            return;
+          }
           CURRENT_ROLE_SELECTION[roleId] = !Boolean(CURRENT_ROLE_SELECTION[roleId]);
           refreshProjectRoleToggleStates();
           validateProjectSettingsUI();
@@ -2520,7 +2575,14 @@
           if (!roleIds.length) {
             return;
           }
+          if (!nextEnabled && roleIds.includes("operator")) {
+            setTopWarning("Operator cannot be disabled. AgentSquad requires Operator to coordinate orchestration.");
+          }
           roleIds.forEach(roleId => {
+            if (roleId === "operator") {
+              CURRENT_ROLE_SELECTION[roleId] = true;
+              return;
+            }
             CURRENT_ROLE_SELECTION[roleId] = nextEnabled;
           });
           refreshProjectRoleToggleStates();
@@ -2672,11 +2734,19 @@
         "</div>",
         '<section class="project-agents">',
         "<h3>Agents By Discipline</h3>",
+        '<p class="settings-hint">Use this menu to Enable/Disable A.I. agents.</p>',
         renderProjectAgentDirectory(project),
         "</section>",
         renderProjectSettings(DATA.settings || {})
       ].join("");
       document.getElementById("project-content").innerHTML = html;
+      const settingsReadmeLink = document.getElementById("project-settings-readme-link");
+      if (settingsReadmeLink) {
+        settingsReadmeLink.addEventListener("click", event => {
+          event.preventDefault();
+          openDocumentsTabForPath("README.md");
+        });
+      }
       wireProjectRoleControls();
       wireProjectSettingsValidation();
     }
@@ -3053,6 +3123,7 @@
 
     function renderAllPanels() {
       renderHeader();
+      renderTopWarning();
       renderInitialization();
       renderProject();
       renderDocuments();
