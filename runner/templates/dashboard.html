@@ -1419,6 +1419,18 @@
       safeStorageSet(STORAGE_KEYS.activeTab, activeTab);
     }
 
+    function openDocumentsTabForPath(path) {
+      const target = String(path || "").trim().toLowerCase();
+      const docs = Array.isArray(DATA.documents) ? DATA.documents : [];
+      const match = docs.find(doc => String(doc.path || "").trim().toLowerCase() === target);
+      if (match) {
+        activeDocId = match.id;
+      }
+      activeTab = "documents";
+      renderTabs();
+      renderDocuments();
+    }
+
     function normalizedTaskStatus(value) {
       return String(value || "")
         .trim()
@@ -1488,7 +1500,12 @@
       if (!hasRunContext) {
         return {
           label: "Operator Not Initialized",
-          className: "status-operator-not-initialized"
+          className: "status-operator-not-initialized",
+          action: {
+            label: "Open README",
+            tabId: "documents",
+            docPath: "README.md"
+          }
         };
       }
 
@@ -1539,6 +1556,10 @@
       if (actionLink && status.action) {
         actionLink.addEventListener("click", event => {
           event.preventDefault();
+          if (status.action.docPath) {
+            openDocumentsTabForPath(status.action.docPath);
+            return;
+          }
           activeTab = status.action.tabId;
           renderTabs();
         });
@@ -1638,7 +1659,7 @@
           },
           body: JSON.stringify(payload)
         });
-        initStatusText = "Project details saved. You can now initialize Operator in your IDE.";
+        initStatusText = "Project details saved. Open README in Documents tab for Operator initialization steps.";
         await refreshDashboardData();
         activeTab = "project";
         renderTabs();
@@ -1662,7 +1683,6 @@
       const serverHint = HAS_API ? "" : "Direct submit requires the local server URL (http://127.0.0.1:4173).";
       const editingLocked = settingsEditingLocked();
       const submitDisabled = initSubmitInFlight || !HAS_API || editingLocked;
-      const nextPrompt = init.operator_init_prompt;
 
       root.innerHTML = [
         '<section class="init-panel">',
@@ -1671,7 +1691,7 @@
         '<ol class="settings-hint">' +
           "<li>Fill out all required fields on this page and click <strong>Submit Project Details</strong>.</li>" +
           "<li>Optional: review additional settings and agent enable/disable in the <a href=\"#\" id=\"init-settings-link\">Settings tab</a>.</li>" +
-          "<li>Open your IDE agent thread and use the initialization prompt shown below.</li>" +
+          "<li>Open the <a href=\"#\" id=\"init-readme-link\">README document on the Documents tab</a> and follow the Operator initialization instructions.</li>" +
         "</ol>",
         serverHint ? '<p class="settings-hint">' + esc(serverHint) + "</p>" : "",
         (init.is_ready && !missing.length)
@@ -1702,19 +1722,13 @@
         '<button type="button" id="init-open-project-btn">Open Settings & Agents</button>',
         '<span class="settings-copy-status" id="init-submit-status"></span>',
         "</div>",
-        '<section class="init-next">',
-        "<strong>Next Step</strong>",
-        "<p class=\"settings-hint\">After submitting details (and optional settings/agent changes), open your IDE and run this prompt:</p>",
-        "<pre><code>" + esc(nextPrompt) + "</code></pre>",
-        '<div class="init-actions"><button type="button" id="init-copy-prompt-btn">Copy Prompt</button></div>',
-        "</section>",
         "</section>"
       ].join("");
 
       const submitButton = document.getElementById("init-submit-btn");
       const settingsLink = document.getElementById("init-settings-link");
+      const docsLink = document.getElementById("init-readme-link");
       const openProjectButton = document.getElementById("init-open-project-btn");
-      const copyPromptButton = document.getElementById("init-copy-prompt-btn");
       const submitStatus = document.getElementById("init-submit-status");
 
       if (submitButton) {
@@ -1737,19 +1751,10 @@
           renderTabs();
         });
       }
-      if (copyPromptButton) {
-        copyPromptButton.disabled = !nextPrompt;
-        copyPromptButton.addEventListener("click", async () => {
-          if (!nextPrompt) {
-            return;
-          }
-          try {
-            await navigator.clipboard.writeText(nextPrompt);
-            initStatusText = "Operator initialization prompt copied.";
-          } catch (error) {
-            initStatusText = "Copy failed. Manually copy the prompt text.";
-          }
-          renderInitialization();
+      if (docsLink) {
+        docsLink.addEventListener("click", event => {
+          event.preventDefault();
+          openDocumentsTabForPath("README.md");
         });
       }
 

@@ -179,47 +179,55 @@ def _collect_documents(root: Path, dashboard_cfg: dict[str, Any]) -> list[dict[s
     seen: set[str] = set()
     docs: list[dict[str, Any]] = []
 
+    def append_markdown_document(md_path: Path, *, force_primary: bool = False) -> None:
+        rel = md_path.relative_to(root).as_posix()
+        if rel in seen:
+            return
+        pure = PurePosixPath(rel)
+        if any(pure.match(pattern) for pattern in exclude_globs):
+            return
+
+        text = md_path.read_text(encoding="utf-8", errors="replace")
+        title = md_path.stem.replace("-", " ").replace("_", " ").title()
+        first_heading = re.search(r"^#\s+(.+)$", text, flags=re.MULTILINE)
+        if first_heading:
+            title = first_heading.group(1).strip()
+        lower_path = rel.lower()
+        primary = force_primary or any(keyword in lower_path for keyword in primary_keywords)
+        try:
+            stat = md_path.stat()
+            created_ts = getattr(stat, "st_birthtime", None)
+            if created_ts is None:
+                created_ts = stat.st_ctime
+            modified_ts = stat.st_mtime
+        except OSError:
+            created_ts = None
+            modified_ts = None
+
+        docs.append(
+            {
+                "id": rel.replace("/", "__"),
+                "path": rel,
+                "title": title,
+                "is_primary": primary,
+                "created_at_utc": _format_utc_timestamp(created_ts),
+                "modified_at_utc": _format_utc_timestamp(modified_ts),
+                "html": _markdown_to_html(text),
+            }
+        )
+        seen.add(rel)
+
     for include_path in include_paths:
         base = root / str(include_path)
         if not base.exists():
             continue
         for md_path in sorted(base.rglob("*.md")):
-            rel = md_path.relative_to(root).as_posix()
-            if rel in seen:
-                continue
-            pure = PurePosixPath(rel)
-            if any(pure.match(pattern) for pattern in exclude_globs):
-                continue
+            append_markdown_document(md_path)
 
-            text = md_path.read_text(encoding="utf-8", errors="replace")
-            title = md_path.stem.replace("-", " ").replace("_", " ").title()
-            first_heading = re.search(r"^#\s+(.+)$", text, flags=re.MULTILINE)
-            if first_heading:
-                title = first_heading.group(1).strip()
-            lower_path = rel.lower()
-            primary = any(keyword in lower_path for keyword in primary_keywords)
-            try:
-                stat = md_path.stat()
-                created_ts = getattr(stat, "st_birthtime", None)
-                if created_ts is None:
-                    created_ts = stat.st_ctime
-                modified_ts = stat.st_mtime
-            except OSError:
-                created_ts = None
-                modified_ts = None
-
-            docs.append(
-                {
-                    "id": rel.replace("/", "__"),
-                    "path": rel,
-                    "title": title,
-                    "is_primary": primary,
-                    "created_at_utc": _format_utc_timestamp(created_ts),
-                    "modified_at_utc": _format_utc_timestamp(modified_ts),
-                    "html": _markdown_to_html(text),
-                }
-            )
-            seen.add(rel)
+    # Ensure project-level README is always visible in Documents for onboarding.
+    root_readme = root / "README.md"
+    if root_readme.exists():
+        append_markdown_document(root_readme, force_primary=True)
 
     docs.sort(key=lambda item: (not bool(item["is_primary"]), item["path"]))
     return docs
