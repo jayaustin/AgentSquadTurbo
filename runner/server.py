@@ -879,11 +879,23 @@ def _build_handler(state: ServerState) -> type[BaseHTTPRequestHandler]:
     return AgentSquadServerHandler
 
 
+class AgentSquadHTTPServer(ThreadingHTTPServer):
+    """HTTP server with quiet handling for expected client disconnects."""
+
+    def handle_error(self, request: Any, client_address: tuple[str, int]) -> None:
+        _, exc, _ = sys.exc_info()
+        if isinstance(exc, (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
+            return
+        if isinstance(exc, OSError) and getattr(exc, "winerror", None) in {10053, 10054}:
+            return
+        super().handle_error(request, client_address)
+
+
 def run_server(root: Path, host: str, port: int) -> int:
     state = ServerState(root=root)
     state.start_watcher()
     handler = _build_handler(state)
-    server = ThreadingHTTPServer((host, port), handler)
+    server = AgentSquadHTTPServer((host, port), handler)
     server.daemon_threads = True
 
     print(f"AgentSquad local server running at http://{host}:{port}")
