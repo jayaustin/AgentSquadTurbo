@@ -61,7 +61,7 @@ def _markdown_to_html(markdown_text: str) -> str:
     lines = markdown_text.splitlines()
     out: list[str] = []
     in_code = False
-    in_list = False
+    list_tag: str | None = None
     paragraph: list[str] = []
 
     def flush_paragraph() -> None:
@@ -74,10 +74,18 @@ def _markdown_to_html(markdown_text: str) -> str:
         paragraph = []
 
     def close_list() -> None:
-        nonlocal in_list
-        if in_list:
-            out.append("</ul>")
-            in_list = False
+        nonlocal list_tag
+        if list_tag:
+            out.append(f"</{list_tag}>")
+            list_tag = None
+
+    def ensure_list(tag: str) -> None:
+        nonlocal list_tag
+        if list_tag == tag:
+            return
+        close_list()
+        out.append(f"<{tag}>")
+        list_tag = tag
 
     for line in lines:
         stripped = line.rstrip()
@@ -113,12 +121,18 @@ def _markdown_to_html(markdown_text: str) -> str:
             out.append(f"<h{level}>{inline_markup(heading.group(2))}</h{level}>")
             continue
 
-        if stripped.startswith("- "):
+        unordered = re.match(r"^\s*[-*+]\s+(.*)$", stripped)
+        if unordered:
             flush_paragraph()
-            if not in_list:
-                out.append("<ul>")
-                in_list = True
-            out.append(f"<li>{inline_markup(stripped[2:].strip())}</li>")
+            ensure_list("ul")
+            out.append(f"<li>{inline_markup(unordered.group(1).strip())}</li>")
+            continue
+
+        ordered = re.match(r"^\s*\d+\.\s+(.*)$", stripped)
+        if ordered:
+            flush_paragraph()
+            ensure_list("ol")
+            out.append(f"<li>{inline_markup(ordered.group(1).strip())}</li>")
             continue
 
         paragraph.append(stripped)
