@@ -50,6 +50,72 @@
       font-size: 0.9rem;
       text-align: right;
     }
+    .status-indicator {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      background: rgba(15, 23, 42, 0.85);
+      color: #e2e8f0;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      white-space: normal;
+      max-width: min(520px, 100%);
+    }
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: #94a3b8;
+      box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.18);
+      flex: 0 0 auto;
+    }
+    .status-setup-required .status-dot {
+      background: #f59e0b;
+      box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
+    }
+    .status-operator-not-initialized .status-dot {
+      background: #60a5fa;
+      box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.18);
+    }
+    .status-paused-action-required .status-dot {
+      background: #ef4444;
+      box-shadow: 0 0 0 4px rgba(239, 68, 68, 0.2);
+    }
+    .status-waiting-input .status-dot {
+      background: #facc15;
+      box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.18);
+    }
+    .status-orchestration-running .status-dot {
+      background: #22c55e;
+      box-shadow: 0 0 0 4px rgba(34, 197, 94, 0.18);
+    }
+    .status-completed .status-dot {
+      background: #2dd4bf;
+      box-shadow: 0 0 0 4px rgba(45, 212, 191, 0.18);
+    }
+    .status-ready-to-start .status-dot {
+      background: #94a3b8;
+      box-shadow: 0 0 0 4px rgba(148, 163, 184, 0.18);
+    }
+    .status-action-link {
+      color: #7dd3fc;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+      margin-left: 6px;
+      font-weight: 600;
+    }
+    .edit-lock-banner {
+      border: 1px solid #dc2626;
+      background: rgba(127, 29, 29, 0.35);
+      color: #fecaca;
+      border-radius: 10px;
+      padding: 10px 12px;
+      margin: 0 0 12px 0;
+      font-weight: 600;
+    }
     .top-tabs {
       display: flex;
       gap: 8px;
@@ -848,8 +914,8 @@
     let DATA = {{DASHBOARD_PAYLOAD_JSON}};
 
     const TAB_DEFS = [
-      { id: "init", label: "Initialize" },
-      { id: "project", label: "Project" },
+      { id: "init", label: "Project" },
+      { id: "project", label: "Settings" },
       { id: "documents", label: "Documents" },
       { id: "tasks", label: "Tasks" },
       { id: "activity", label: "Activity Log" },
@@ -1353,17 +1419,130 @@
       safeStorageSet(STORAGE_KEYS.activeTab, activeTab);
     }
 
+    function normalizedTaskStatus(value) {
+      return String(value || "")
+        .trim()
+        .toLowerCase()
+        .replaceAll("_", " ")
+        .replaceAll("-", " ");
+    }
+
+    function latestActivityEntry() {
+      const events = Array.isArray(DATA.activity_log) ? DATA.activity_log : [];
+      return events.length ? events[0] : null;
+    }
+
+    function settingsEditingLocked() {
+      return computeHeaderStatusModel().className === "status-orchestration-running";
+    }
+
+    function editLockBannerHtml() {
+      if (!settingsEditingLocked()) {
+        return "";
+      }
+      return '<div class="edit-lock-banner" role="alert">Settings cannot be changed while orchestration is running. Check your IDE Operator thread for details, then pause or wait for completion before editing.</div>';
+    }
+
+    function computeHeaderStatusModel() {
+      const init = initState();
+      const state = (DATA.project && DATA.project.state) ? DATA.project.state : {};
+      const hasRunId = Boolean(String(state.run_id || "").trim());
+      const activeRole = String(state.active_role || "").trim();
+      const currentRequest = String(state.current_request || "").trim();
+      const lastCompletedTaskId = String(state.last_completed_task_id || "").trim();
+      const tasks = Array.isArray(DATA.tasks) ? DATA.tasks : [];
+      const doneCount = tasks.filter(task => normalizedTaskStatus(task && task.status) === "done").length;
+      const inProgressCount = tasks.filter(task => normalizedTaskStatus(task && task.status) === "in progress").length;
+      const remainingCount = Math.max(0, tasks.length - doneCount);
+      const latestEvent = latestActivityEntry();
+      const latestEventStatus = normalizedTaskStatus(latestEvent && latestEvent.status);
+      const latestEventType = String((latestEvent && latestEvent.event_type) || "").trim().toLowerCase();
+      const hasOperatorActivity = (Array.isArray(DATA.activity_log) ? DATA.activity_log : []).some(entry => {
+        const eventType = String((entry && entry.event_type) || "").toLowerCase();
+        return eventType.includes("operator") || eventType.includes("agent_result");
+      });
+      const waitingForInput = latestEventStatus === "needs input" ||
+        latestEventType === "operator_human_feedback" ||
+        latestEventType === "human_feedback_written";
+      const hasRunContext = hasRunId || Boolean(activeRole) || Boolean(currentRequest) ||
+        Boolean(lastCompletedTaskId) || hasOperatorActivity;
+
+      if (!init.is_ready) {
+        return {
+          label: "Setup Required",
+          className: "status-setup-required",
+          action: {
+            label: "Open Project Tab",
+            tabId: "init"
+          }
+        };
+      }
+
+      if (state.halted) {
+        return {
+          label: "Paused - Action Required (Check IDE)",
+          className: "status-paused-action-required"
+        };
+      }
+
+      if (!hasRunContext) {
+        return {
+          label: "Operator Not Initialized",
+          className: "status-operator-not-initialized"
+        };
+      }
+
+      if (waitingForInput) {
+        return {
+          label: "Waiting for Your Input",
+          className: "status-waiting-input"
+        };
+      }
+
+      if (inProgressCount > 0 || Boolean(activeRole)) {
+        return {
+          label: "Orchestration Running",
+          className: "status-orchestration-running"
+        };
+      }
+
+      if (tasks.length > 0 && remainingCount === 0) {
+        return {
+          label: "Completed",
+          className: "status-completed"
+        };
+      }
+
+      return {
+        label: "Ready to Start",
+        className: "status-ready-to-start"
+      };
+    }
+
     function renderHeader() {
       const meta = document.getElementById("header-meta");
-      const halted = DATA.project.state.halted ? "Yes" : "No";
-      const generatedUtc = DATA.generated_at_utc || "n/a";
-      const generatedLocal = generatedUtc === "n/a" ? "n/a" : formatLocalTimestamp(generatedUtc);
-      const init = initState();
-      const initReady = init.is_ready ? "Yes" : "No";
+      const status = computeHeaderStatusModel();
+      let actionHtml = "";
+      if (status.action) {
+        actionHtml = ' <a href="#" class="status-action-link" id="header-status-action">' +
+          esc(status.action.label) +
+          "</a>";
+      }
+
       meta.innerHTML =
-        "Generated (Local): <strong>" + esc(generatedLocal) + "</strong><br>" +
-        "Halted: <strong>" + esc(halted) + "</strong><br>" +
-        "Init Ready: <strong>" + esc(initReady) + "</strong>";
+        '<span class="status-indicator ' + status.className + '">' +
+        '<span class="status-dot" aria-hidden="true"></span>' +
+        '<span>' + esc(status.label) + actionHtml + "</span>" +
+        "</span>";
+
+      const actionLink = document.getElementById("header-status-action");
+      if (actionLink && status.action) {
+        actionLink.addEventListener("click", event => {
+          event.preventDefault();
+          activeTab = status.action.tabId;
+          renderTabs();
+        });
+      }
     }
 
     function kvRow(label, value) {
@@ -1427,6 +1606,11 @@
         renderInitialization();
         return;
       }
+      if (settingsEditingLocked()) {
+        initStatusText = "Project details are locked while orchestration is running. Check IDE Operator thread.";
+        renderInitialization();
+        return;
+      }
       const payload = initPayloadFromUI();
       const errors = initValidationErrors({
         project_id: payload.project.id,
@@ -1476,15 +1660,17 @@
       const errors = initValidationErrors(fields);
       const missing = init.missing_fields || [];
       const serverHint = HAS_API ? "" : "Direct submit requires the local server URL (http://127.0.0.1:4173).";
-      const submitDisabled = initSubmitInFlight || !HAS_API;
+      const editingLocked = settingsEditingLocked();
+      const submitDisabled = initSubmitInFlight || !HAS_API || editingLocked;
       const nextPrompt = init.operator_init_prompt;
 
       root.innerHTML = [
         '<section class="init-panel">',
+        editLockBannerHtml(),
         "<h3>Project Initialization</h3>",
         '<ol class="settings-hint">' +
           "<li>Fill out all required fields on this page and click <strong>Submit Project Details</strong>.</li>" +
-          "<li>Optional: review additional settings and agent enable/disable in the <a href=\"#\" id=\"init-settings-link\">Project tab</a>.</li>" +
+          "<li>Optional: review additional settings and agent enable/disable in the <a href=\"#\" id=\"init-settings-link\">Settings tab</a>.</li>" +
           "<li>Open your IDE agent thread and use the initialization prompt shown below.</li>" +
         "</ol>",
         serverHint ? '<p class="settings-hint">' + esc(serverHint) + "</p>" : "",
@@ -1567,11 +1753,19 @@
         });
       }
 
+      if (editingLocked) {
+        root.querySelectorAll("input, textarea, select").forEach(element => {
+          element.disabled = true;
+        });
+      }
+
       if (submitStatus) {
         if (initSubmitInFlight) {
           submitStatus.textContent = "Submitting...";
         } else if (initStatusText) {
           submitStatus.textContent = initStatusText;
+        } else if (editingLocked) {
+          submitStatus.textContent = "Edits are locked while orchestration is running. Check IDE Operator thread.";
         } else if (submitDisabled && errors.length) {
           submitStatus.textContent = "Complete required fields to submit.";
         } else if (!HAS_API) {
@@ -2137,6 +2331,7 @@
       if (!root) {
         return;
       }
+      const editingLocked = settingsEditingLocked();
       const hasRoleChanges = Boolean(roleChanges && roleChanges.hasChanges);
       const hasChanges = changes.length > 0 || hasRoleChanges;
       const hasValidationErrors = Array.isArray(errors) && errors.length > 0;
@@ -2184,7 +2379,7 @@
 
       const applyButton = document.getElementById("project-settings-apply-btn");
       const status = document.getElementById("project-settings-apply-status");
-      const buttonDisabled = settingsApplyInFlight || hasValidationErrors || !HAS_API;
+      const buttonDisabled = settingsApplyInFlight || hasValidationErrors || !HAS_API || editingLocked;
       if (applyButton) {
         applyButton.disabled = buttonDisabled;
         applyButton.textContent = settingsApplyInFlight ? "Applying..." : "Apply Settings";
@@ -2195,6 +2390,8 @@
       if (status) {
         if (settingsApplyInFlight) {
           status.textContent = "Applying settings...";
+        } else if (editingLocked) {
+          status.textContent = "Settings are locked while orchestration is running. Check IDE Operator thread.";
         } else if (settingsApplyStatus) {
           status.textContent = settingsApplyStatus;
         } else if (!HAS_API) {
@@ -2209,6 +2406,11 @@
 
     async function applyProjectSettings() {
       if (settingsApplyInFlight) {
+        return;
+      }
+      if (settingsEditingLocked()) {
+        settingsApplyStatus = "Settings are locked while orchestration is running. Check IDE Operator thread.";
+        validateProjectSettingsUI();
         return;
       }
       if (!HAS_API) {
@@ -2290,6 +2492,9 @@
       }
       root.querySelectorAll("[data-role-toggle][data-role-id]").forEach(button => {
         button.addEventListener("click", () => {
+          if (settingsEditingLocked()) {
+            return;
+          }
           const roleId = String(button.getAttribute("data-role-id") || "").trim();
           if (!roleId || !getProjectRoleIds().includes(roleId)) {
             return;
@@ -2301,6 +2506,9 @@
       });
       root.querySelectorAll("[data-group-action][data-role-ids]").forEach(button => {
         button.addEventListener("click", () => {
+          if (settingsEditingLocked()) {
+            return;
+          }
           const action = String(button.getAttribute("data-group-action") || "").trim().toLowerCase();
           const nextEnabled = action === "enable";
           const roleIds = parseRoleIdList(button.getAttribute("data-role-ids"));
@@ -2315,6 +2523,21 @@
         });
       });
       refreshProjectRoleToggleStates();
+      syncProjectEditingState();
+    }
+
+    function syncProjectEditingState() {
+      const root = document.getElementById("project-content");
+      if (!root) {
+        return;
+      }
+      const locked = settingsEditingLocked();
+      root.querySelectorAll(".project-settings input, .project-settings select, .project-settings textarea").forEach(element => {
+        element.disabled = locked;
+      });
+      root.querySelectorAll("[data-role-toggle], [data-group-action]").forEach(element => {
+        element.disabled = locked;
+      });
     }
 
     function validateProjectSettingsValues() {
@@ -2407,6 +2630,7 @@
       const changes = settingsChangesFromSnapshots(INITIAL_SETTINGS_SNAPSHOT, currentSnapshot);
       const roleChanges = roleSelectionChanges(INITIAL_ROLE_SELECTION, CURRENT_ROLE_SELECTION);
       renderSettingsApplyActions(changes, roleChanges, errors);
+      syncProjectEditingState();
     }
 
     function wireProjectSettingsValidation() {
@@ -2424,6 +2648,7 @@
     function renderProject() {
       const project = DATA.project;
       const html = [
+        editLockBannerHtml(),
         '<div class="cards">',
         '<section class="card"><h3>Project</h3><dl class="kv">',
         kvRow("Project ID", project.id),
