@@ -1,4 +1,4 @@
-"""Static dashboard renderer for AgentSquad state."""
+"""Dashboard payload builder and static snapshot renderer."""
 
 from __future__ import annotations
 
@@ -388,13 +388,44 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
     return payload
 
 
+def build_payload(
+    root: Path,
+    *,
+    repo_root_relative_prefix: str = ".",
+    output_path: str = "project/state/dashboard.html",
+) -> dict[str, Any]:
+    """Build dashboard payload without writing output files."""
+    return _build_payload(
+        root=root,
+        repo_root_relative_prefix=repo_root_relative_prefix,
+        output_path=output_path,
+    )
+
+
+def render_dashboard_html(
+    root: Path,
+    *,
+    repo_root_relative_prefix: str = ".",
+    output_path: str = "project/state/dashboard.html",
+) -> str:
+    """Render dashboard HTML for server responses without writing snapshot files."""
+    template_path = root / "runner" / "templates" / "dashboard.html"
+    template = template_path.read_text(encoding="utf-8")
+    payload = build_payload(
+        root=root,
+        repo_root_relative_prefix=repo_root_relative_prefix,
+        output_path=output_path,
+    )
+    return template.replace(
+        "{{DASHBOARD_PAYLOAD_JSON}}",
+        json.dumps(payload, ensure_ascii=True).replace("</", "<\\/"),
+    )
+
+
 def render_dashboard(root: Path) -> Path:
     config = validators.load_project_config(root)
     dashboard_cfg = validators.dashboard_config_with_defaults(config)
     output_file = root / str(dashboard_cfg.get("output_file", "project/state/dashboard.html"))
-
-    template_path = root / "runner" / "templates" / "dashboard.html"
-    template = template_path.read_text(encoding="utf-8")
     try:
         output_rel = output_file.relative_to(root).as_posix()
     except ValueError:
@@ -403,14 +434,10 @@ def render_dashboard(root: Path) -> Path:
     depth = len(PurePosixPath(output_rel).parent.parts)
     repo_root_relative_prefix = "." if depth == 0 else "/".join([".."] * depth)
 
-    payload = _build_payload(
+    rendered = render_dashboard_html(
         root=root,
         repo_root_relative_prefix=repo_root_relative_prefix,
         output_path=output_rel,
-    )
-    rendered = template.replace(
-        "{{DASHBOARD_PAYLOAD_JSON}}",
-        json.dumps(payload, ensure_ascii=True).replace("</", "<\\/"),
     )
 
     output_file.parent.mkdir(parents=True, exist_ok=True)

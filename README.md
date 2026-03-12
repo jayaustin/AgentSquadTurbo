@@ -1,6 +1,6 @@
 # AgentSquad v1
 
-AgentSquad is a non-API orchestration framework for IDE-based agent workflows.
+AgentSquad is a local-server orchestration framework for IDE-based agent workflows.
 
 ## 1. Overview
 
@@ -21,7 +21,7 @@ Key ideas and value:
   rolling summary of its latest five tasks for fresh-context continuity.
 - Backlog (`backlog.md`) is the source of truth for work ownership/status.
 - Contracts are machine-validated JSON (`operator_plan`, `agent_result`) with retry-then-halt behavior.
-- Persisted project truth is file-based (`.md`, `.yaml`, `.jsonl`) and surfaced through dashboard snapshots.
+- Persisted project truth is file-based (`.md`, `.yaml`, `.jsonl`) and surfaced through a local dashboard server (with optional static snapshots).
 
 Execution model clarity:
 
@@ -36,45 +36,53 @@ Execution model clarity:
 To use this framework for a new project:
 
 1. Clone this repository into a new project directory.
-2. Confirm your IDE assistant is supported by a functional adapter in
+2. Install and start the local server:
+
+```bash
+npm install
+npm run dev
+```
+
+This launches the dashboard and API at `http://127.0.0.1:4173`.
+3. Confirm your IDE assistant is supported by a functional adapter in
    [`runner/adapters/`](runner/adapters/) (look for a real implementation, not a stub).
-3. Keep project/product files you want agents to manage inside this cloned
+4. Keep project/product files you want agents to manage inside this cloned
    `AgentSquad` directory (for example under `project/`, `docs/`, or another
    in-repo folder).
-4. Open the cloned folder in your IDE agent environment.
-5. Start a fresh IDE agent thread and use this short prompt:
+5. Open the cloned folder in your IDE agent environment.
+6. Start a fresh IDE agent thread and use this short prompt:
 
 ```text
 Read AGENTS.md and initialize this thread as AgentSquad Operator
 ```
 
-6. The IDE agent should run required bootstrap commands automatically:
+7. The IDE agent should run required bootstrap commands automatically:
    - generate `project/state/operator-bootstrap.md`
    - load and follow that packet
-7. Answer Operator initialization intake so it can update:
+8. Answer Operator initialization intake so it can update:
    - `project/context/project-context.md`
    - `project/config/project.yaml`
    - Optional but recommended: complete the deep-dive intake follow-up to provide
      richer detail on goals, users, constraints, deliverables, and acceptance criteria.
-8. Complete Operator role enablement review:
+9. Complete Operator role enablement review:
    - Operator proposes roles to disable (all roles are enabled by default)
    - You confirm one of: `apply-recommendations`, `keep-all`, or `custom`
    - Operator records confirmation in `project/config/project.yaml` (`roles.review_confirmed: true`)
-9. After initialization reaches `READY`, provide your first project request.
+10. After initialization reaches `READY`, provide your first project request.
 
 Note: in an ideal environment, users should not manually run bootstrap CLI
 steps. Initialization should be handled by the IDE agent thread.
 
 ## 3. Dashboard
 
-AgentSquad renders a no-server, dark-mode dashboard snapshot after operator and
-step execution events. The dashboard includes:
+AgentSquad runs a local Python dashboard server with live updates. The dashboard includes:
 
 - `Project`: project summary, execution policy, role counts, state/halt info
 - `Documents`: browser-friendly rendering of included markdown deliverables
-- `Tasks`: backlog table with sort/filter controls
-- `Activity Log`: global timeline across all roles
+- `Tasks`: backlog table with sort/filter controls and live updates
+- `Activity Log`: global timeline across all roles with live updates
 - `Agents`: per-role tabs with role context and individual activity timeline
+- `Project Settings`: direct apply to `project/config/project.yaml` (including role enable/disable)
 
 Color accents are role-specific and configurable in
 `project/config/project.yaml` under `dashboard.agent_colors`.
@@ -86,18 +94,31 @@ Structured activity events are written to:
 
 Markdown run journals remain in `project/workspaces/<role-id>/runs/`.
 
-Dashboard snapshot path:
+Primary dashboard URL:
+
+- `http://127.0.0.1:4173/`
+
+Optional static export path (for offline snapshot sharing):
 
 - `project/state/dashboard.html`
 
-Open directly in browser via `file://`.
-
 ## 4. CLI
 
-Run commands from repository root:
+Recommended npm commands from repository root:
+
+```bash
+npm run dev
+npm run validate
+npm run step
+npm run run -- --request "your request"
+npm run resume
+```
+
+Equivalent Python commands are still available:
 
 ```bash
 python -m runner.orchestrator init
+python -m runner.server
 python -m runner.orchestrator bootstrap-operator --print-packet
 python -m runner.orchestrator validate
 python -m runner.orchestrator render-dashboard

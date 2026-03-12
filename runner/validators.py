@@ -482,6 +482,13 @@ def _validate_project_config(config: dict[str, Any]) -> list[str]:
     return errors
 
 
+def validate_project_config_data(config: dict[str, Any]) -> list[str]:
+    """Validate an in-memory project config object."""
+    if not isinstance(config, dict):
+        return ["project/config/project.yaml must be an object."]
+    return _validate_project_config(config)
+
+
 def _validate_role_frontmatter(
     role_id: str, frontmatter: dict[str, Any], known_superpowers: set[str]
 ) -> list[str]:

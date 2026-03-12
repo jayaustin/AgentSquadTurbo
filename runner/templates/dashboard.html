@@ -756,7 +756,7 @@
   </div>
 
   <script>
-    const DATA = {{DASHBOARD_PAYLOAD_JSON}};
+    let DATA = {{DASHBOARD_PAYLOAD_JSON}};
 
     const TAB_DEFS = [
       { id: "project", label: "Project" },
@@ -791,7 +791,8 @@
     };
     const DELIVERABLE_COLLAPSE_THRESHOLD = 14;
     const DELIVERABLE_PREVIEW_COUNT = 8;
-    const REPO_ROOT_PREFIX = String(DATA.repo_root_relative_prefix || ".").replaceAll("\\", "/");
+    const HAS_API = window.location.protocol === "http:" || window.location.protocol === "https:";
+    let REPO_ROOT_PREFIX = String(DATA.repo_root_relative_prefix || ".").replaceAll("\\", "/");
     const SETTINGS_OPTIONS = {
       hostPrimaryAdapter: [
         "antigravity",
@@ -931,9 +932,9 @@
         .replace(/\/+/g, "/");
     }
 
-    const KNOWN_FILES = Array.isArray(DATA.known_files) ? DATA.known_files.map(normalizePath) : [];
-    const KNOWN_FILE_SET = new Set(KNOWN_FILES);
-    const BASENAME_INDEX = buildBasenameIndex(KNOWN_FILES);
+    let KNOWN_FILES = [];
+    let KNOWN_FILE_SET = new Set();
+    let BASENAME_INDEX = {};
 
     function buildBasenameIndex(paths) {
       const index = {};
@@ -953,6 +954,15 @@
       });
       return index;
     }
+
+    function refreshKnownFileIndex() {
+      KNOWN_FILES = Array.isArray(DATA.known_files) ? DATA.known_files.map(normalizePath) : [];
+      KNOWN_FILE_SET = new Set(KNOWN_FILES);
+      BASENAME_INDEX = buildBasenameIndex(KNOWN_FILES);
+      REPO_ROOT_PREFIX = String(DATA.repo_root_relative_prefix || ".").replaceAll("\\", "/");
+    }
+
+    refreshKnownFileIndex();
 
     function fileHref(path) {
       const normalized = normalizePath(path);
@@ -1385,7 +1395,7 @@
     }
 
     function renderProjectAgentDirectory(project) {
-      const allRoleIds = PROJECT_ROLE_IDS.slice();
+      const allRoleIds = getProjectRoleIds();
       const roleEntries = allRoleIds.map(roleId => ({
         role_id: roleId,
         display_name: roleDisplayName(project, roleId),
@@ -1561,7 +1571,7 @@
 
         "</div>",
         '<div id="project-settings-validation" class="settings-validation"></div>',
-        '<div id="project-settings-prompt" class="settings-prompt"></div>',
+        '<div id="project-settings-actions" class="settings-prompt"></div>',
         "</section>"
       ].join("");
     }
@@ -1656,17 +1666,20 @@
       });
     }
 
-    const PROJECT_ROLE_IDS = sortRoleIds(Array.from(new Set([
-      ...(DATA.project.enabled_roles || []),
-      ...(DATA.project.disabled_roles || []),
-      ...((DATA.agents || []).map(agent => String(agent.role_id || "").trim()).filter(Boolean))
-    ])));
+    function getProjectRoleIds() {
+      return sortRoleIds(Array.from(new Set([
+        ...(DATA.project.enabled_roles || []),
+        ...(DATA.project.disabled_roles || []),
+        ...((DATA.agents || []).map(agent => String(agent.role_id || "").trim()).filter(Boolean))
+      ])));
+    }
 
     function buildRoleSelectionFromProject(project) {
       const enabledSet = new Set(project.enabled_roles || []);
       const disabledSet = new Set(project.disabled_roles || []);
+      const roleIds = getProjectRoleIds();
       const selection = {};
-      PROJECT_ROLE_IDS.forEach(roleId => {
+      roleIds.forEach(roleId => {
         selection[roleId] = enabledSet.has(roleId) && !disabledSet.has(roleId);
       });
       return selection;
@@ -1675,7 +1688,8 @@
     function roleSelectionSnapshot(selection) {
       const enabled = [];
       const disabled = [];
-      PROJECT_ROLE_IDS.forEach(roleId => {
+      const roleIds = getProjectRoleIds();
+      roleIds.forEach(roleId => {
         if (selection[roleId]) {
           enabled.push(roleId);
         } else {
@@ -1689,7 +1703,8 @@
     }
 
     function roleSelectionChanges(beforeSelection, afterSelection) {
-      const changedRoles = PROJECT_ROLE_IDS
+      const roleIds = getProjectRoleIds();
+      const changedRoles = roleIds
         .filter(roleId => Boolean(beforeSelection[roleId]) !== Boolean(afterSelection[roleId]))
         .map(roleId => ({
           role_id: roleId,
@@ -1711,9 +1726,11 @@
       };
     }
 
-    const INITIAL_SETTINGS_SNAPSHOT = buildSettingsSnapshotFromData(DATA.settings || {});
-    const INITIAL_ROLE_SELECTION = buildRoleSelectionFromProject(DATA.project);
+    let INITIAL_SETTINGS_SNAPSHOT = buildSettingsSnapshotFromData(DATA.settings || {});
+    let INITIAL_ROLE_SELECTION = buildRoleSelectionFromProject(DATA.project);
     let CURRENT_ROLE_SELECTION = Object.assign({}, INITIAL_ROLE_SELECTION);
+    let settingsApplyInFlight = false;
+    let settingsApplyStatus = "";
 
     function settingsChangesFromSnapshots(before, after) {
       const specsByKey = {};
@@ -1745,134 +1762,169 @@
       return changes;
     }
 
-    function toYamlScalar(value) {
-      if (typeof value === "boolean") {
-        return value ? "true" : "false";
-      }
-      if (typeof value === "number") {
-        return String(value);
-      }
-      const text = String(value ?? "");
-      if (!text) {
-        return '""';
-      }
-      const simpleToken = /^[A-Za-z0-9._\-/]+$/.test(text);
-      const lowered = text.toLowerCase();
-      if (simpleToken && lowered !== "true" && lowered !== "false" && lowered !== "null") {
-        return text;
-      }
-      return JSON.stringify(text);
+    function buildSettingsPatchPayload(currentSnapshot, roleChanges) {
+      return {
+        settings: {
+          host: {
+            primary_adapter: currentSnapshot["host.primary_adapter"],
+            adapter_command: currentSnapshot["host.adapter_command"],
+            session_mode: currentSnapshot["host.session_mode"],
+            context_rot_guardrails: {
+              max_turns_per_role_session:
+                currentSnapshot["host.context_rot_guardrails.max_turns_per_role_session"],
+              max_session_age_minutes:
+                currentSnapshot["host.context_rot_guardrails.max_session_age_minutes"],
+              force_reload_on_context_change:
+                currentSnapshot["host.context_rot_guardrails.force_reload_on_context_change"]
+            }
+          },
+          execution: {
+            mode: currentSnapshot["execution.mode"],
+            handoff_authority: currentSnapshot["execution.handoff_authority"],
+            selection_policy: currentSnapshot["execution.selection_policy"],
+            unexpected_event_policy: currentSnapshot["execution.unexpected_event_policy"]
+          },
+          dashboard: {
+            output_file: currentSnapshot["dashboard.output_file"],
+            refresh_policy: currentSnapshot["dashboard.refresh_policy"],
+            failure_mode: currentSnapshot["dashboard.failure_mode"]
+          }
+        },
+        roles: {
+          enabled: roleChanges.enabledRoles,
+          disabled: roleChanges.disabledRoles
+        }
+      };
     }
 
-    function toYamlFlowList(values) {
-      if (!Array.isArray(values) || !values.length) {
-        return "[]";
-      }
-      return "[" + values.map(value => toYamlScalar(String(value))).join(", ") + "]";
-    }
-
-    function buildOperatorSettingsPrompt(changes, roleChanges, hasValidationErrors) {
-      const lines = [];
-      lines.push("Update project settings in `project/config/project.yaml`.");
-      if (hasValidationErrors) {
-        lines.push("Validation warning: one or more values are currently invalid in the dashboard.");
-        lines.push("Fix validation issues before submitting this request.");
-      }
-      lines.push("");
-      lines.push("[ALLOW-GOVERNANCE-EDITS]");
-      lines.push("governance_file_edits_approved: true");
-      lines.push("");
-      lines.push("Apply these settings exactly:");
-      changes.forEach(change => {
-        lines.push(change.key + ": " + toYamlScalar(change.to));
-      });
-      if (roleChanges && roleChanges.hasChanges) {
-        lines.push("roles.enabled: " + toYamlFlowList(roleChanges.enabledRoles));
-        lines.push("roles.disabled: " + toYamlFlowList(roleChanges.disabledRoles));
-      }
-      if (!changes.length && !(roleChanges && roleChanges.hasChanges)) {
-        lines.push("# No changes detected.");
-      }
-      if (roleChanges && roleChanges.hasChanges) {
-        lines.push("");
-        lines.push("Requested role state updates:");
-        roleChanges.changedRoles.forEach(change => {
-          const stateText = change.to_enabled ? "Enabled" : "Disabled";
-          lines.push("- " + change.role_id + " (" + change.display_name + "): " + stateText);
-        });
-      }
-      lines.push("");
-      lines.push("After applying updates:");
-      lines.push("1. Run `python -m runner.orchestrator validate`");
-      lines.push("2. Run `python -m runner.orchestrator render-dashboard`");
-      lines.push("3. Summarize the settings changed and confirm completion.");
-      return lines.join("\n");
-    }
-
-    function renderOperatorSettingsPrompt(changes, roleChanges, errors) {
-      const root = document.getElementById("project-settings-prompt");
+    function renderSettingsApplyActions(changes, roleChanges, errors) {
+      const root = document.getElementById("project-settings-actions");
       if (!root) {
         return;
       }
       const hasRoleChanges = Boolean(roleChanges && roleChanges.hasChanges);
-      if (!changes.length && !hasRoleChanges) {
+      const hasChanges = changes.length > 0 || hasRoleChanges;
+      const hasValidationErrors = Array.isArray(errors) && errors.length > 0;
+      const serverHint = HAS_API
+        ? ""
+        : "Direct apply is only available when running the local server (http://...).";
+
+      if (!hasChanges) {
         root.innerHTML = [
-          "<h4>Prompt for Operator</h4>",
-          '<p class="settings-hint">No settings or role-state changes detected. Edit settings or toggle agent states to generate a prompt for Operator.</p>'
+          "<h4>Apply Settings</h4>",
+          '<p class="settings-hint">No settings or role-state changes detected.</p>',
+          settingsApplyStatus
+            ? '<div class="settings-copy-status">' + esc(settingsApplyStatus) + "</div>"
+            : ""
         ].join("");
         return;
       }
 
-      const hasValidationErrors = Array.isArray(errors) && errors.length > 0;
+      const changedSettings = changes.map(change => (
+        "<li><code>" + esc(change.key) + "</code>: <strong>" +
+        esc(String(change.to)) + "</strong></li>"
+      ));
+      const changedRoles = (roleChanges && roleChanges.hasChanges)
+        ? roleChanges.changedRoles.map(change => (
+          "<li><code>" + esc(change.role_id) + "</code>: <strong>" +
+          esc(change.to_enabled ? "Enabled" : "Disabled") + "</strong></li>"
+        ))
+        : [];
+
       root.innerHTML = [
-        "<h4>Prompt for Operator</h4>",
-        '<p class="settings-hint">Copy/paste this prompt into the Operator chat to apply your configuration changes.</p>',
-        '<textarea id="project-settings-prompt-text" readonly></textarea>',
+        "<h4>Apply Settings</h4>",
+        '<p class="settings-hint">Apply validated changes directly to <code>project/config/project.yaml</code>.</p>',
+        serverHint ? '<p class="settings-hint">' + esc(serverHint) + "</p>" : "",
+        changedSettings.length
+          ? "<strong>Setting changes</strong><ul class=\"settings-errors\">" + changedSettings.join("") + "</ul>"
+          : "",
+        changedRoles.length
+          ? "<strong>Role changes</strong><ul class=\"settings-errors\">" + changedRoles.join("") + "</ul>"
+          : "",
         '<div class="settings-prompt-actions">',
-        '<button type="button" class="settings-copy-btn" id="project-settings-copy-btn">Copy Prompt</button>',
-        '<span class="settings-copy-status" id="project-settings-copy-status"></span>',
+        '<button type="button" class="settings-copy-btn" id="project-settings-apply-btn">Apply Settings</button>',
+        '<span class="settings-copy-status" id="project-settings-apply-status"></span>',
         "</div>"
       ].join("");
 
-      const promptText = buildOperatorSettingsPrompt(changes, roleChanges, hasValidationErrors);
-      const textArea = document.getElementById("project-settings-prompt-text");
-      const copyButton = document.getElementById("project-settings-copy-btn");
-      const copyStatus = document.getElementById("project-settings-copy-status");
-      if (textArea) {
-        textArea.value = promptText;
-      }
-      if (copyButton) {
-        if (hasValidationErrors) {
-          copyButton.disabled = true;
-        }
-        copyButton.addEventListener("click", async () => {
-          if (hasValidationErrors || !textArea) {
-            return;
-          }
-          try {
-            await navigator.clipboard.writeText(textArea.value);
-            if (copyStatus) {
-              copyStatus.textContent = "Prompt copied.";
-            }
-          } catch (error) {
-            if (copyStatus) {
-              copyStatus.textContent = "Copy failed. Select and copy manually.";
-            }
-          }
+      const applyButton = document.getElementById("project-settings-apply-btn");
+      const status = document.getElementById("project-settings-apply-status");
+      const buttonDisabled = settingsApplyInFlight || hasValidationErrors || !HAS_API;
+      if (applyButton) {
+        applyButton.disabled = buttonDisabled;
+        applyButton.textContent = settingsApplyInFlight ? "Applying..." : "Apply Settings";
+        applyButton.addEventListener("click", () => {
+          void applyProjectSettings();
         });
       }
-      if (copyStatus) {
-        copyStatus.textContent = hasValidationErrors
-          ? "Resolve validation issues above before sending this prompt."
-          : "Ready to copy.";
+      if (status) {
+        if (settingsApplyInFlight) {
+          status.textContent = "Applying settings...";
+        } else if (settingsApplyStatus) {
+          status.textContent = settingsApplyStatus;
+        } else if (!HAS_API) {
+          status.textContent = "Start the local server to apply settings.";
+        } else if (hasValidationErrors) {
+          status.textContent = "Resolve validation issues before applying.";
+        } else {
+          status.textContent = "Ready to apply.";
+        }
+      }
+    }
+
+    async function applyProjectSettings() {
+      if (settingsApplyInFlight) {
+        return;
+      }
+      if (!HAS_API) {
+        settingsApplyStatus = "Direct apply requires the local Python server.";
+        validateProjectSettingsUI();
+        return;
+      }
+
+      const errors = validateProjectSettingsValues();
+      const currentSnapshot = buildSettingsSnapshotFromUI();
+      const changes = settingsChangesFromSnapshots(INITIAL_SETTINGS_SNAPSHOT, currentSnapshot);
+      const roleChanges = roleSelectionChanges(INITIAL_ROLE_SELECTION, CURRENT_ROLE_SELECTION);
+      if (errors.length) {
+        settingsApplyStatus = "Fix validation issues before applying settings.";
+        validateProjectSettingsUI();
+        return;
+      }
+      if (!changes.length && !roleChanges.hasChanges) {
+        settingsApplyStatus = "No changes detected.";
+        validateProjectSettingsUI();
+        return;
+      }
+
+      settingsApplyInFlight = true;
+      settingsApplyStatus = "Applying settings...";
+      validateProjectSettingsUI();
+
+      try {
+        await fetchJson("/api/settings", {
+          method: "PATCH",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(buildSettingsPatchPayload(currentSnapshot, roleChanges))
+        });
+        settingsApplyStatus = "Settings applied successfully.";
+        await refreshDashboardData();
+      } catch (error) {
+        settingsApplyStatus = "Apply failed: " + String(error.message || error);
+      } finally {
+        settingsApplyInFlight = false;
+        validateProjectSettingsUI();
       }
     }
 
     function parseRoleIdList(value) {
+      const roleIds = getProjectRoleIds();
       return String(value || "")
         .split(",")
         .map(roleId => roleId.trim())
-        .filter(roleId => roleId.length > 0 && PROJECT_ROLE_IDS.includes(roleId));
+        .filter(roleId => roleId.length > 0 && roleIds.includes(roleId));
     }
 
     function applyRoleToggleButtonState(button, enabled) {
@@ -1904,7 +1956,7 @@
       root.querySelectorAll("[data-role-toggle][data-role-id]").forEach(button => {
         button.addEventListener("click", () => {
           const roleId = String(button.getAttribute("data-role-id") || "").trim();
-          if (!roleId || !PROJECT_ROLE_IDS.includes(roleId)) {
+          if (!roleId || !getProjectRoleIds().includes(roleId)) {
             return;
           }
           CURRENT_ROLE_SELECTION[roleId] = !Boolean(CURRENT_ROLE_SELECTION[roleId]);
@@ -1930,7 +1982,7 @@
       refreshProjectRoleToggleStates();
     }
 
-    function validateProjectSettingsUI() {
+    function validateProjectSettingsValues() {
       const errors = [];
       const primaryAdapter = settingValue("setting-host-primary-adapter");
       if (!SETTINGS_OPTIONS.hostPrimaryAdapter.includes(primaryAdapter)) {
@@ -1998,7 +2050,11 @@
       if (!SETTINGS_OPTIONS.dashboardFailureMode.includes(failureMode)) {
         errors.push("Dashboard Failure Mode must be non-blocking-log.");
       }
+      return errors;
+    }
 
+    function validateProjectSettingsUI() {
+      const errors = validateProjectSettingsValues();
       const validation = document.getElementById("project-settings-validation");
       if (validation) {
         if (!errors.length) {
@@ -2015,7 +2071,7 @@
       const currentSnapshot = buildSettingsSnapshotFromUI();
       const changes = settingsChangesFromSnapshots(INITIAL_SETTINGS_SNAPSHOT, currentSnapshot);
       const roleChanges = roleSelectionChanges(INITIAL_ROLE_SELECTION, CURRENT_ROLE_SELECTION);
-      renderOperatorSettingsPrompt(changes, roleChanges, errors);
+      renderSettingsApplyActions(changes, roleChanges, errors);
     }
 
     function wireProjectSettingsValidation() {
@@ -2370,22 +2426,68 @@
       renderAgentPanel(active);
     }
 
-    function initTaskControls() {
-      const statuses = ["ALL", ...Object.keys(DATA.project.status_counts || {})];
+    let taskControlsWired = false;
+    let liveEventSource = null;
+    let liveReconnectTimer = null;
+    let refreshQueued = false;
+
+    async function fetchJson(path, options) {
+      const response = await fetch(path, options || {});
+      let payload = null;
+      try {
+        payload = await response.json();
+      } catch (error) {
+        payload = null;
+      }
+      if (!response.ok || !payload || payload.ok === false) {
+        const message = payload && Array.isArray(payload.errors) && payload.errors.length
+          ? payload.errors.join("; ")
+          : ("Request failed: " + response.status + " " + response.statusText);
+        throw new Error(message);
+      }
+      return payload;
+    }
+
+    function resetSettingsBaselines() {
+      INITIAL_SETTINGS_SNAPSHOT = buildSettingsSnapshotFromData(DATA.settings || {});
+      INITIAL_ROLE_SELECTION = buildRoleSelectionFromProject(DATA.project || {});
+      CURRENT_ROLE_SELECTION = Object.assign({}, INITIAL_ROLE_SELECTION);
+    }
+
+    function applyDashboardPayload(nextPayload) {
+      DATA = nextPayload || {};
+      refreshKnownFileIndex();
+      resetSettingsBaselines();
+    }
+
+    function updateTaskStatusFilterOptions() {
       const filter = document.getElementById("task-status-filter");
+      if (!filter) {
+        return;
+      }
+      const current = String(filter.value || "ALL");
+      const statuses = ["ALL", ...Object.keys(DATA.project.status_counts || {})];
       filter.innerHTML = statuses.map(status => (
         '<option value="' + esc(status) + '">' + (status === "ALL" ? "All Statuses" : esc(status)) + "</option>"
       )).join("");
-      document.getElementById("task-search").addEventListener("input", renderTasks);
-      filter.addEventListener("change", renderTasks);
+      if (statuses.includes(current)) {
+        filter.value = current;
+      } else {
+        filter.value = "ALL";
+      }
     }
 
-    function boot() {
-      const persistedTab = safeStorageGet(STORAGE_KEYS.activeTab);
-      if (persistedTab && TAB_DEFS.some(tab => tab.id === persistedTab)) {
-        activeTab = persistedTab;
+    function initTaskControls() {
+      updateTaskStatusFilterOptions();
+      if (taskControlsWired) {
+        return;
       }
-      renderTabs();
+      document.getElementById("task-search").addEventListener("input", renderTasks);
+      document.getElementById("task-status-filter").addEventListener("change", renderTasks);
+      taskControlsWired = true;
+    }
+
+    function renderAllPanels() {
       renderHeader();
       renderProject();
       renderDocuments();
@@ -2395,7 +2497,98 @@
       renderAgents();
     }
 
-    boot();
+    async function refreshDashboardData() {
+      if (!HAS_API) {
+        return;
+      }
+      const response = await fetchJson("/api/dashboard");
+      applyDashboardPayload(response.dashboard || {});
+      renderAllPanels();
+    }
+
+    function queueDashboardRefresh() {
+      if (refreshQueued) {
+        return;
+      }
+      refreshQueued = true;
+      window.setTimeout(() => {
+        refreshQueued = false;
+        void refreshDashboardData().catch(error => {
+          console.error("Dashboard refresh failed:", error);
+        });
+      }, 120);
+    }
+
+    function scheduleLiveReconnect() {
+      if (liveReconnectTimer) {
+        return;
+      }
+      liveReconnectTimer = window.setTimeout(() => {
+        liveReconnectTimer = null;
+        connectLiveUpdates();
+      }, 1000);
+    }
+
+    function connectLiveUpdates() {
+      if (!HAS_API || typeof EventSource === "undefined") {
+        return;
+      }
+      if (liveEventSource) {
+        try {
+          liveEventSource.close();
+        } catch (error) {
+          // Ignore close errors.
+        }
+      }
+      const source = new EventSource("/api/events");
+      liveEventSource = source;
+      const handledEvents = [
+        "connected",
+        "tasks_changed",
+        "activity_changed",
+        "state_changed",
+        "settings_changed",
+        "message"
+      ];
+      handledEvents.forEach(eventName => {
+        source.addEventListener(eventName, () => {
+          if (eventName === "connected") {
+            return;
+          }
+          queueDashboardRefresh();
+        });
+      });
+      source.onerror = () => {
+        try {
+          source.close();
+        } catch (error) {
+          // Ignore close errors.
+        }
+        scheduleLiveReconnect();
+      };
+    }
+
+    async function boot() {
+      const persistedTab = safeStorageGet(STORAGE_KEYS.activeTab);
+      if (persistedTab && TAB_DEFS.some(tab => tab.id === persistedTab)) {
+        activeTab = persistedTab;
+      }
+      renderTabs();
+      if (HAS_API) {
+        try {
+          await refreshDashboardData();
+        } catch (error) {
+          console.error("Initial dashboard load failed:", error);
+          renderAllPanels();
+        }
+        connectLiveUpdates();
+      } else {
+        applyDashboardPayload(DATA);
+        renderAllPanels();
+      }
+    }
+
+    void boot();
   </script>
 </body>
 </html>

@@ -1,9 +1,9 @@
 project:
   id: sample-project
-  name: Sample Project
+  name: "Sample Project"
 host:
   primary_adapter: codex
-  adapter_command: codex --sandbox workspace-write --ask-for-approval never exec --ephemeral
+  adapter_command: "codex --sandbox workspace-write --ask-for-approval never exec --ephemeral"
   session_mode: stateless
   context_rot_guardrails:
     max_turns_per_role_session: 8
@@ -187,9 +187,9 @@ execution:
 backlog:
   statuses:
     - Todo
-    - In Progress
+    - "In Progress"
     - Blocked
-    - In Validation
+    - "In Validation"
     - Done
 dashboard:
   enabled: true
@@ -202,11 +202,11 @@ dashboard:
       - docs
       - project/context
     exclude_globs:
-      - superpowers/**
-      - steering/**
-      - runner/templates/**
-      - project/workspaces/**/runs/**
-      - project/workspaces/**/notes.md
+      - "superpowers/**"
+      - "steering/**"
+      - "runner/templates/**"
+      - "project/workspaces/**/runs/**"
+      - "project/workspaces/**/notes.md"
     primary_name_keywords:
       - design
       - technical

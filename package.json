@@ -1,0 +1,14 @@
+{
+  "name": "agentsquad",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Local orchestration and live dashboard launcher for AgentSquad.",
+  "scripts": {
+    "dev": "node runner/scripts/run-python-module.mjs runner.server",
+    "start": "npm run dev",
+    "validate": "node runner/scripts/run-python-module.mjs runner.orchestrator validate",
+    "step": "node runner/scripts/run-python-module.mjs runner.orchestrator step",
+    "resume": "node runner/scripts/run-python-module.mjs runner.orchestrator resume",
+    "run": "node runner/scripts/run-python-module.mjs runner.orchestrator run"
+  }
+}
