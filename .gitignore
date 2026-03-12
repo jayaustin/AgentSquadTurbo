@@ -110,6 +110,7 @@ tmp/
 temp/
 *.tmp
 *.temp
+todo.md
 
 # Archives
 *.7z
