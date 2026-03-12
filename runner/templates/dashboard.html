@@ -349,6 +349,81 @@
       color: var(--muted);
       font-size: 0.8rem;
     }
+    .init-panel {
+      background: var(--panel-2);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px;
+      display: grid;
+      gap: 12px;
+    }
+    .init-panel h3 {
+      margin: 0;
+      color: #dbeafe;
+      font-size: 1.05rem;
+    }
+    .init-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+      gap: 10px;
+    }
+    .init-field {
+      background: #0f172a;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 9px;
+      display: grid;
+      gap: 6px;
+    }
+    .init-field label {
+      color: #cbd5e1;
+      font-size: 0.86rem;
+      font-weight: 600;
+    }
+    .init-field input,
+    .init-field textarea {
+      width: 100%;
+      background: #0b1220;
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      padding: 8px;
+      font-family: inherit;
+    }
+    .init-field textarea {
+      min-height: 92px;
+      resize: vertical;
+    }
+    .init-actions {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 8px;
+    }
+    .init-actions button {
+      border: 1px solid var(--border);
+      background: #17233a;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 7px 11px;
+      cursor: pointer;
+    }
+    .init-errors {
+      margin: 0;
+      padding-left: 18px;
+      color: #fecaca;
+    }
+    .init-next {
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: #0f172a;
+      padding: 10px;
+      display: grid;
+      gap: 8px;
+    }
+    .init-next pre {
+      margin: 0;
+    }
     .split {
       display: grid;
       grid-template-columns: 280px 1fr;
@@ -715,6 +790,10 @@
     </div>
     <div class="top-tabs" id="top-tabs"></div>
 
+    <section class="tab-panel" id="tab-init">
+      <div class="panel-pad" id="init-content"></div>
+    </section>
+
     <section class="tab-panel" id="tab-project">
       <div class="panel-pad" id="project-content"></div>
     </section>
@@ -759,6 +838,7 @@
     let DATA = {{DASHBOARD_PAYLOAD_JSON}};
 
     const TAB_DEFS = [
+      { id: "init", label: "Initialize" },
       { id: "project", label: "Project" },
       { id: "documents", label: "Documents" },
       { id: "tasks", label: "Tasks" },
@@ -871,6 +951,8 @@
     let activeAgentId = null;
     let sortKey = "task_id";
     let sortDir = "asc";
+    let initSubmitInFlight = false;
+    let initStatusText = "";
 
     function esc(text) {
       return String(text ?? "")
@@ -963,6 +1045,31 @@
     }
 
     refreshKnownFileIndex();
+
+    function initState() {
+      const base = (DATA && typeof DATA.initialization === "object" && DATA.initialization)
+        ? DATA.initialization
+        : {};
+      const fields = (base && typeof base.fields === "object" && base.fields)
+        ? base.fields
+        : {};
+      return {
+        is_ready: Boolean(base.is_ready),
+        missing_fields: Array.isArray(base.missing_fields) ? base.missing_fields : [],
+        operator_init_prompt: String(base.operator_init_prompt || "Read AGENTS.md and initialize this thread as AgentSquad Operator"),
+        fields: {
+          project_id: String(fields.project_id || ""),
+          project_name: String(fields.project_name || ""),
+          project_goals: String(fields.project_goals || ""),
+          target_users: String(fields.target_users || ""),
+          key_constraints: String(fields.key_constraints || ""),
+          primary_deliverables: String(fields.primary_deliverables || ""),
+          acceptance_criteria: String(fields.acceptance_criteria || ""),
+          non_goals: String(fields.non_goals || ""),
+          notes: String(fields.notes || "")
+        }
+      };
+    }
 
     function fileHref(path) {
       const normalized = normalizePath(path);
@@ -1225,6 +1332,9 @@
     function renderTabs() {
       const tabsRoot = document.getElementById("top-tabs");
       tabsRoot.innerHTML = "";
+      if (!TAB_DEFS.some(tab => tab.id === activeTab)) {
+        activeTab = "project";
+      }
       TAB_DEFS.forEach(tab => tabsRoot.appendChild(tabButton(tab)));
       TAB_DEFS.forEach(tab => {
         const panel = document.getElementById("tab-" + tab.id);
@@ -1238,13 +1348,207 @@
       const halted = DATA.project.state.halted ? "Yes" : "No";
       const generatedUtc = DATA.generated_at_utc || "n/a";
       const generatedLocal = generatedUtc === "n/a" ? "n/a" : formatLocalTimestamp(generatedUtc);
+      const init = initState();
+      const initReady = init.is_ready ? "Yes" : "No";
       meta.innerHTML =
         "Generated (Local): <strong>" + esc(generatedLocal) + "</strong><br>" +
-        "Halted: <strong>" + esc(halted) + "</strong>";
+        "Halted: <strong>" + esc(halted) + "</strong><br>" +
+        "Init Ready: <strong>" + esc(initReady) + "</strong>";
     }
 
     function kvRow(label, value) {
       return "<dt>" + esc(label) + "</dt><dd>" + esc(value) + "</dd>";
+    }
+
+    function initFieldValue(id) {
+      const element = document.getElementById(id);
+      if (!element) {
+        return "";
+      }
+      return String(element.value || "").trim();
+    }
+
+    function initValidationErrors(values) {
+      const errors = [];
+      const requiredFields = [
+        { id: "init-project-id", key: "project_id", label: "project.id" },
+        { id: "init-project-name", key: "project_name", label: "project.name" },
+        { id: "init-project-goals", key: "project_goals", label: "Project goals" },
+        { id: "init-target-users", key: "target_users", label: "Target users" },
+        { id: "init-key-constraints", key: "key_constraints", label: "Key constraints" },
+        { id: "init-primary-deliverables", key: "primary_deliverables", label: "Primary deliverables" },
+        { id: "init-acceptance-criteria", key: "acceptance_criteria", label: "Acceptance criteria" }
+      ];
+      requiredFields.forEach(field => {
+        const value = values
+          ? String(values[field.key] || "").trim()
+          : initFieldValue(field.id);
+        if (!value) {
+          errors.push(field.label + " is required.");
+        }
+      });
+      return errors;
+    }
+
+    function initPayloadFromUI() {
+      return {
+        project: {
+          id: initFieldValue("init-project-id"),
+          name: initFieldValue("init-project-name")
+        },
+        context: {
+          project_goals: initFieldValue("init-project-goals"),
+          target_users: initFieldValue("init-target-users"),
+          key_constraints: initFieldValue("init-key-constraints"),
+          primary_deliverables: initFieldValue("init-primary-deliverables"),
+          acceptance_criteria: initFieldValue("init-acceptance-criteria"),
+          non_goals: initFieldValue("init-non-goals"),
+          notes: initFieldValue("init-notes")
+        }
+      };
+    }
+
+    async function submitInitializationDetails() {
+      if (initSubmitInFlight) {
+        return;
+      }
+      if (!HAS_API) {
+        initStatusText = "Start the local server (npm run dev) to submit initialization.";
+        renderInitialization();
+        return;
+      }
+      const errors = initValidationErrors();
+      if (errors.length) {
+        initStatusText = "Fix required fields before submitting initialization.";
+        renderInitialization();
+        return;
+      }
+
+      initSubmitInFlight = true;
+      initStatusText = "Submitting project details...";
+      renderInitialization();
+      try {
+        await fetchJson("/api/init/submit", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json"
+          },
+          body: JSON.stringify(initPayloadFromUI())
+        });
+        initStatusText = "Project details saved. You can now initialize Operator in your IDE.";
+        await refreshDashboardData();
+        activeTab = "project";
+        renderTabs();
+      } catch (error) {
+        initStatusText = "Initialization submit failed: " + String(error.message || error);
+      } finally {
+        initSubmitInFlight = false;
+        renderInitialization();
+      }
+    }
+
+    function renderInitialization() {
+      const root = document.getElementById("init-content");
+      if (!root) {
+        return;
+      }
+      const init = initState();
+      const fields = init.fields;
+      const errors = initValidationErrors(fields);
+      const missing = init.missing_fields || [];
+      const serverHint = HAS_API ? "" : "Direct submit requires the local server URL (http://127.0.0.1:4173).";
+      const submitDisabled = initSubmitInFlight || !HAS_API;
+      const nextPrompt = init.operator_init_prompt;
+
+      root.innerHTML = [
+        '<section class="init-panel">',
+        "<h3>Project Initialization</h3>",
+        '<p class="settings-hint">Enter project details before opening your IDE Operator thread.</p>',
+        serverHint ? '<p class="settings-hint">' + esc(serverHint) + "</p>" : "",
+        (init.is_ready && !missing.length)
+          ? '<div class="settings-validation ok">Required project details are complete.</div>'
+          : (
+            '<div class="settings-validation error"><strong>Missing required fields:</strong><ul class="init-errors">' +
+            (missing.length
+              ? missing.map(item => "<li>" + esc(item) + "</li>").join("")
+              : "<li>Complete required initialization details.</li>") +
+            "</ul></div>"
+          ),
+        '<div class="init-grid">',
+        '<div class="init-field"><label for="init-project-id">Project ID (Required)</label><input id="init-project-id" value="' + esc(fields.project_id) + '" placeholder="acme-subscription-optimizer"></div>',
+        '<div class="init-field"><label for="init-project-name">Project Name (Required)</label><input id="init-project-name" value="' + esc(fields.project_name) + '" placeholder="Acme Subscription Optimizer"></div>',
+        '<div class="init-field"><label for="init-project-goals">Project Goals (Required)</label><textarea id="init-project-goals" placeholder="Business outcomes and targets.">' + esc(fields.project_goals) + "</textarea></div>",
+        '<div class="init-field"><label for="init-target-users">Target Users (Required)</label><textarea id="init-target-users" placeholder="Who this project serves.">' + esc(fields.target_users) + "</textarea></div>",
+        '<div class="init-field"><label for="init-key-constraints">Key Constraints (Required)</label><textarea id="init-key-constraints" placeholder="Time, budget, stack, compliance.">' + esc(fields.key_constraints) + "</textarea></div>",
+        '<div class="init-field"><label for="init-primary-deliverables">Primary Deliverables (Required)</label><textarea id="init-primary-deliverables" placeholder="Expected specs/code/tests/assets.">' + esc(fields.primary_deliverables) + "</textarea></div>",
+        '<div class="init-field"><label for="init-acceptance-criteria">Acceptance Criteria (Required)</label><textarea id="init-acceptance-criteria" placeholder="How completion is validated.">' + esc(fields.acceptance_criteria) + "</textarea></div>",
+        '<div class="init-field"><label for="init-non-goals">Non-goals (Optional)</label><textarea id="init-non-goals" placeholder="What is intentionally out of scope.">' + esc(fields.non_goals) + "</textarea></div>",
+        '<div class="init-field"><label for="init-notes">Notes (Optional)</label><textarea id="init-notes" placeholder="Extra context for Operator and specialist roles.">' + esc(fields.notes) + "</textarea></div>",
+        "</div>",
+        (errors.length)
+          ? ('<ul class="init-errors">' + errors.map(item => "<li>" + esc(item) + "</li>").join("") + "</ul>")
+          : "",
+        '<div class="init-actions">',
+        '<button type="button" id="init-submit-btn">Submit Project Details</button>',
+        '<button type="button" id="init-open-project-btn">Open Settings & Agents</button>',
+        '<span class="settings-copy-status" id="init-submit-status"></span>',
+        "</div>",
+        '<section class="init-next">',
+        "<strong>Next Step</strong>",
+        "<p class=\"settings-hint\">After submitting details (and optional settings/agent changes), open your IDE and run this prompt:</p>",
+        "<pre><code>" + esc(nextPrompt) + "</code></pre>",
+        '<div class="init-actions"><button type="button" id="init-copy-prompt-btn">Copy Prompt</button></div>',
+        "</section>",
+        "</section>"
+      ].join("");
+
+      const submitButton = document.getElementById("init-submit-btn");
+      const openProjectButton = document.getElementById("init-open-project-btn");
+      const copyPromptButton = document.getElementById("init-copy-prompt-btn");
+      const submitStatus = document.getElementById("init-submit-status");
+
+      if (submitButton) {
+        submitButton.disabled = submitDisabled;
+        submitButton.textContent = initSubmitInFlight ? "Submitting..." : "Submit Project Details";
+        submitButton.addEventListener("click", () => {
+          void submitInitializationDetails();
+        });
+      }
+      if (openProjectButton) {
+        openProjectButton.addEventListener("click", () => {
+          activeTab = "project";
+          renderTabs();
+        });
+      }
+      if (copyPromptButton) {
+        copyPromptButton.disabled = !nextPrompt;
+        copyPromptButton.addEventListener("click", async () => {
+          if (!nextPrompt) {
+            return;
+          }
+          try {
+            await navigator.clipboard.writeText(nextPrompt);
+            initStatusText = "Operator initialization prompt copied.";
+          } catch (error) {
+            initStatusText = "Copy failed. Manually copy the prompt text.";
+          }
+          renderInitialization();
+        });
+      }
+
+      if (submitStatus) {
+        if (initSubmitInFlight) {
+          submitStatus.textContent = "Submitting...";
+        } else if (initStatusText) {
+          submitStatus.textContent = initStatusText;
+        } else if (submitDisabled && errors.length) {
+          submitStatus.textContent = "Complete required fields to submit.";
+        } else if (!HAS_API) {
+          submitStatus.textContent = "Start local server to submit initialization.";
+        } else {
+          submitStatus.textContent = "Ready to submit.";
+        }
+      }
     }
 
     function roleDisplayName(project, roleId) {
@@ -2489,6 +2793,7 @@
 
     function renderAllPanels() {
       renderHeader();
+      renderInitialization();
       renderProject();
       renderDocuments();
       initTaskControls();
@@ -2573,17 +2878,27 @@
       if (persistedTab && TAB_DEFS.some(tab => tab.id === persistedTab)) {
         activeTab = persistedTab;
       }
-      renderTabs();
       if (HAS_API) {
         try {
           await refreshDashboardData();
+          if (!persistedTab && !initState().is_ready) {
+            activeTab = "init";
+          }
         } catch (error) {
           console.error("Initial dashboard load failed:", error);
+          if (!persistedTab && !initState().is_ready) {
+            activeTab = "init";
+          }
           renderAllPanels();
         }
+        renderTabs();
         connectLiveUpdates();
       } else {
         applyDashboardPayload(DATA);
+        if (!persistedTab && !initState().is_ready) {
+          activeTab = "init";
+        }
+        renderTabs();
         renderAllPanels();
       }
     }

@@ -92,7 +92,6 @@ pnpm-debug.log*
 *.pid.lock
 *.seed
 debug.log
-project/state/dashboard.html
 
 # Local environment and secrets
 .env

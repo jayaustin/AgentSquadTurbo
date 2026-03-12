@@ -7,6 +7,7 @@ import copy
 import json
 import mimetypes
 import queue
+import re
 import subprocess
 import sys
 import threading
@@ -25,6 +26,16 @@ DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 4173
 SSE_HEARTBEAT_SECONDS = 15
 WATCH_INTERVAL_SECONDS = 1.0
+UNSET_VALUE_MARKERS = {"", "tbd", "todo", "n/a", "na", "unknown"}
+REQUIRED_CONTEXT_FIELDS = (
+    "Project goals",
+    "Target users",
+    "Key constraints",
+    "Primary deliverables",
+    "Acceptance criteria",
+)
+OPTIONAL_CONTEXT_FIELDS = ("Non-goals",)
+OPERATOR_INIT_PROMPT = "Read AGENTS.md and initialize this thread as AgentSquad Operator"
 
 
 def utc_now() -> str:
@@ -210,6 +221,172 @@ def _parse_positive_int(value: Any, *, field_name: str, errors: list[str]) -> in
         errors.append(f"{field_name} must be an integer greater than 0.")
         return 0
     return parsed
+
+
+def _is_value_defined(raw_value: str) -> bool:
+    normalized = str(raw_value or "").strip().lower()
+    return normalized not in UNSET_VALUE_MARKERS
+
+
+def _extract_context_value(context_text: str, field_label: str) -> str:
+    pattern = rf"^- {re.escape(field_label)}:[ \t]*(.*)$"
+    match = re.search(pattern, context_text, flags=re.MULTILINE)
+    if not match:
+        return ""
+    return match.group(1).strip()
+
+
+def _context_field_values(root: Path) -> dict[str, str]:
+    labels = [*REQUIRED_CONTEXT_FIELDS, *OPTIONAL_CONTEXT_FIELDS]
+    values = {label: "" for label in labels}
+    context_path = root / "project" / "context" / "project-context.md"
+    if not context_path.exists():
+        return values
+    context_text = context_path.read_text(encoding="utf-8")
+    for label in labels:
+        values[label] = _extract_context_value(context_text, label)
+    return values
+
+
+def _read_notes_section(root: Path) -> str:
+    context_path = root / "project" / "context" / "project-context.md"
+    if not context_path.exists():
+        return ""
+    text = context_path.read_text(encoding="utf-8")
+    marker = "## Notes"
+    index = text.find(marker)
+    if index == -1:
+        return ""
+    notes = text[index + len(marker) :].strip()
+    return notes
+
+
+def _format_context_markdown(values: dict[str, str], notes: str) -> str:
+    non_goals = str(values.get("Non-goals", "")).strip()
+    notes_text = str(notes).strip()
+    if not notes_text:
+        notes_text = "Add evolving context here as work progresses."
+    lines = [
+        "# Project Context",
+        "",
+        "Use this file to capture project-specific context shared across all roles.",
+        "",
+        "## Summary",
+        "",
+        f"- Project goals: {str(values.get('Project goals', '')).strip()}",
+        f"- Target users: {str(values.get('Target users', '')).strip()}",
+        f"- Key constraints: {str(values.get('Key constraints', '')).strip()}",
+        f"- Non-goals: {non_goals}",
+        "",
+        "## Deliverables",
+        "",
+        f"- Primary deliverables: {str(values.get('Primary deliverables', '')).strip()}",
+        f"- Acceptance criteria: {str(values.get('Acceptance criteria', '')).strip()}",
+        "",
+        "## Notes",
+        "",
+        notes_text,
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def _initialization_state(root: Path) -> dict[str, Any]:
+    config = validators.load_project_config(root)
+    project_cfg = config.get("project", {})
+    context_values = _context_field_values(root)
+    project_id = str(project_cfg.get("id", "")).strip()
+    project_name = str(project_cfg.get("name", "")).strip()
+
+    missing_fields: list[str] = []
+    if not _is_value_defined(project_id) or project_id == "sample-project":
+        missing_fields.append("project.id")
+    if not _is_value_defined(project_name) or project_name.lower() == "sample project":
+        missing_fields.append("project.name")
+    for field in REQUIRED_CONTEXT_FIELDS:
+        if not _is_value_defined(context_values.get(field, "")):
+            missing_fields.append(field)
+
+    return {
+        "is_ready": len(missing_fields) == 0,
+        "missing_fields": missing_fields,
+        "operator_init_prompt": OPERATOR_INIT_PROMPT,
+        "fields": {
+            "project_id": project_id if project_id != "sample-project" else "",
+            "project_name": project_name if project_name.lower() != "sample project" else "",
+            "project_goals": context_values.get("Project goals", ""),
+            "target_users": context_values.get("Target users", ""),
+            "key_constraints": context_values.get("Key constraints", ""),
+            "primary_deliverables": context_values.get("Primary deliverables", ""),
+            "acceptance_criteria": context_values.get("Acceptance criteria", ""),
+            "non_goals": context_values.get("Non-goals", ""),
+            "notes": _read_notes_section(root),
+        },
+    }
+
+
+def _apply_initialization_submission(
+    root: Path,
+    payload: dict[str, Any],
+) -> tuple[bool, dict[str, Any]]:
+    if not isinstance(payload, dict):
+        return False, {"errors": ["Request body must be a JSON object."]}
+
+    errors: list[str] = []
+    project_payload = payload.get("project", {})
+    context_payload = payload.get("context", {})
+    if project_payload is None:
+        project_payload = {}
+    if context_payload is None:
+        context_payload = {}
+    if not isinstance(project_payload, dict):
+        errors.append("project must be an object.")
+        project_payload = {}
+    if not isinstance(context_payload, dict):
+        errors.append("context must be an object.")
+        context_payload = {}
+
+    project_id = str(project_payload.get("id", "")).strip()
+    project_name = str(project_payload.get("name", "")).strip()
+    field_map = {
+        "Project goals": str(context_payload.get("project_goals", "")).strip(),
+        "Target users": str(context_payload.get("target_users", "")).strip(),
+        "Key constraints": str(context_payload.get("key_constraints", "")).strip(),
+        "Primary deliverables": str(context_payload.get("primary_deliverables", "")).strip(),
+        "Acceptance criteria": str(context_payload.get("acceptance_criteria", "")).strip(),
+        "Non-goals": str(context_payload.get("non_goals", "")).strip(),
+    }
+    notes = str(context_payload.get("notes", "")).strip()
+
+    if not _is_value_defined(project_id):
+        errors.append("project.id is required.")
+    if not _is_value_defined(project_name):
+        errors.append("project.name is required.")
+    for label in REQUIRED_CONTEXT_FIELDS:
+        if not _is_value_defined(field_map.get(label, "")):
+            errors.append(f"{label} is required.")
+    if errors:
+        return False, {"errors": errors}
+
+    config = validators.load_project_config(root)
+    updated = copy.deepcopy(config)
+    project_cfg = updated.setdefault("project", {})
+    if not isinstance(project_cfg, dict):
+        project_cfg = {}
+        updated["project"] = project_cfg
+    project_cfg["id"] = project_id
+    project_cfg["name"] = project_name
+
+    config_errors = validators.validate_project_config_data(updated)
+    if config_errors:
+        return False, {"errors": config_errors}
+
+    validators.write_yaml_file(root / "project" / "config" / "project.yaml", updated)
+    context_markdown = _format_context_markdown(field_map, notes)
+    context_path = root / "project" / "context" / "project-context.md"
+    context_path.parent.mkdir(parents=True, exist_ok=True)
+    context_path.write_text(context_markdown, encoding="utf-8")
+    return True, {"initialization": _initialization_state(root)}
 
 
 def _validate_role_sets(root: Path, config: dict[str, Any]) -> list[str]:
@@ -485,6 +662,7 @@ def _build_handler(state: ServerState) -> type[BaseHTTPRequestHandler]:
 
         def _dashboard_sections(self) -> dict[str, Any]:
             payload = state.build_dashboard_payload()
+            payload["initialization"] = _initialization_state(state.root)
             return payload
 
         def do_GET(self) -> None:  # noqa: N802
@@ -566,6 +744,15 @@ def _build_handler(state: ServerState) -> type[BaseHTTPRequestHandler]:
                     },
                 )
                 return
+            if path == "/api/init/status":
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "initialization": _initialization_state(state.root),
+                    },
+                )
+                return
 
             self._serve_static_file(path)
 
@@ -619,6 +806,26 @@ def _build_handler(state: ServerState) -> type[BaseHTTPRequestHandler]:
 
         def do_POST(self) -> None:  # noqa: N802
             parsed = urlparse(self.path)
+            if parsed.path == "/api/init/submit":
+                body = self._read_json_body()
+                if body is None:
+                    return
+                with state.lock:
+                    ok, details = _apply_initialization_submission(state.root, body)
+                if not ok:
+                    self._send_json(400, {"ok": False, "errors": details.get("errors", [])})
+                    return
+                state.broker.publish("settings_changed", {"source": "api", "action": "init-submit"})
+                state.broker.publish("state_changed", {"source": "api", "action": "init-submit"})
+                self._send_json(
+                    200,
+                    {
+                        "ok": True,
+                        "initialization": details.get("initialization", _initialization_state(state.root)),
+                    },
+                )
+                return
+
             if not parsed.path.startswith("/api/orchestrator/"):
                 self._send_json(404, {"ok": False, "errors": ["Not found."]})
                 return

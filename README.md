@@ -44,26 +44,24 @@ npm run dev
 ```
 
 This launches the dashboard and API at `http://127.0.0.1:4173`.
-3. Confirm your IDE assistant is supported by a functional adapter in
+3. Open the dashboard URL and complete the **Initialize** tab:
+   - Fill all required project details fields and submit.
+   - Optional: adjust settings and enable/disable agents in the **Project** tab.
+4. Confirm your IDE assistant is supported by a functional adapter in
    [`runner/adapters/`](runner/adapters/) (look for a real implementation, not a stub).
-4. Keep project/product files you want agents to manage inside this cloned
+5. Keep project/product files you want agents to manage inside this cloned
    `AgentSquad` directory (for example under `project/`, `docs/`, or another
    in-repo folder).
-5. Open the cloned folder in your IDE agent environment.
-6. Start a fresh IDE agent thread and use this short prompt:
+6. Open the cloned folder in your IDE agent environment.
+7. Start a fresh IDE agent thread and use this short prompt:
 
 ```text
 Read AGENTS.md and initialize this thread as AgentSquad Operator
 ```
 
-7. The IDE agent should run required bootstrap commands automatically:
+8. The IDE agent should run required bootstrap commands automatically:
    - generate `project/state/operator-bootstrap.md`
    - load and follow that packet
-8. Answer Operator initialization intake so it can update:
-   - `project/context/project-context.md`
-   - `project/config/project.yaml`
-   - Optional but recommended: complete the deep-dive intake follow-up to provide
-     richer detail on goals, users, constraints, deliverables, and acceptance criteria.
 9. Complete Operator role enablement review:
    - Operator proposes roles to disable (all roles are enabled by default)
    - You confirm one of: `apply-recommendations`, `keep-all`, or `custom`
@@ -77,6 +75,7 @@ steps. Initialization should be handled by the IDE agent thread.
 
 AgentSquad runs a local Python dashboard server with live updates. The dashboard includes:
 
+- `Initialize`: project-details form for first-run setup before IDE initialization
 - `Project`: project summary, execution policy, role counts, state/halt info
 - `Documents`: browser-friendly rendering of included markdown deliverables
 - `Tasks`: backlog table with sort/filter controls and live updates
