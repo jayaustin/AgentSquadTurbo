@@ -1,6 +1,7 @@
-# AgentSquad v1
+# AgentSquadTurbo README
 
-AgentSquad is a local-server orchestration framework for IDE-based agent workflows.
+AgentSquadTurbo is a local-server orchestration framework for IDE-based agent workflows.
+It is an evolution of the original AgentSquad project: [jayaustin/AgentSquad](https://github.com/jayaustin/AgentSquad).
 
 ## 1. Overview
 

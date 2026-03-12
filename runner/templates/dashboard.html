@@ -2766,10 +2766,9 @@
 
       sortedDocs.forEach(doc => {
         const button = document.createElement("button");
-        const primaryPrefix = doc.is_primary ? "Primary: " : "";
         button.className = "left-item" + (doc.id === activeDocId ? " active" : "");
         button.innerHTML = [
-          '<span class="doc-item-title">' + esc(primaryPrefix + doc.title) + "</span>",
+          '<span class="doc-item-title">' + esc(doc.title) + "</span>",
           '<span class="doc-item-meta">Created: ' + esc(docTimestampText(doc.created_at_utc)) + "</span>",
           '<span class="doc-item-meta">Last Modified: ' + esc(docTimestampText(doc.modified_at_utc)) + "</span>"
         ].join("");
