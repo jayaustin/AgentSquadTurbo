@@ -1,372 +1,253 @@
-# AgentSquadTurbo README
+# AgentSquadTurbo
 
-AgentSquadTurbo is a local-server orchestration framework for IDE-based agent workflows.
-It is an evolution of the original AgentSquad project: [jayaustin/AgentSquad](https://github.com/jayaustin/AgentSquad).
+**Run a local AI org chart instead of babysitting one chat thread.**
 
-## 1. Overview
+AgentSquadTurbo turns your CLI-based or IDE-embedded AI coding assistant into an `Operator` that manages a large team of specialized agents, maintains a dependency-aware backlog, and streams the whole project into a live dashboard. You stay in charge. The bot team handles planning, routing, execution, logging, and handoffs.
 
-AgentSquad puts you in the role of a CEO or Executive Producer managing a team
-of expert agents. You define what should be built, and `Operator` (your project
-manager) decomposes that intent into right-sized backlog work, coordinates role
-handoffs, and keeps execution moving in dependency-safe order.
+Under the hood, this is a **local CLI orchestration framework** paired with **CLI and IDE agent workflows**. The local Python server/orchestrator runs on your machine, while the human-facing `Operator` can be used from a CLI agent session such as Codex CLI or from an IDE-embedded agent environment such as VS Code.
 
-Key ideas and value:
+This is the pitch in plain English:
 
-- Global framework assets live under `steering/`, `agents/`, and `superpowers/`.
-- Project-specific state and outputs live under `project/`.
-- `Operator` is the only role that interfaces directly with the human request.
-- `Operator` acts as planner/orchestrator and does not own or execute backlog tasks.
-- Roles run sequentially with strict context load order:
-  `steering -> role -> project -> role-override -> recent-activity`.
-- Each role maintains `agents/roles/<role-id>/recent_activity.md` with a
-  rolling summary of its latest five tasks for fresh-context continuity.
-- Backlog (`backlog.md`) is the source of truth for work ownership/status.
-- Contracts are machine-validated JSON (`operator_plan`, `agent_result`) with retry-then-halt behavior.
-- Persisted project truth is file-based (`.md`, `.yaml`, `.jsonl`) and surfaced through a local dashboard server (with optional static snapshots).
+- You act like the CEO of your own team of bots.
+- Work is driven through a real backlog instead of disappearing into chat history.
+- A local dashboard shows what every agent did, what changed, and what happens next.
 
-Execution model clarity:
+AgentSquadTurbo is local-first, file-based, and built for serious multi-agent project execution. The framework currently ships with **166 built-in agent roles** across design, UX, spec writing, architecture, engineering, QA, security, localization, and audio. That roster is a starting point, not a fixed ceiling: agent roles are fully customizable, you can extend the behavior of existing agents, and you can develop your own new agents to match your workflow.
 
-- Agent turns are real adapter CLI invocations, not fake/simulated role labels.
-- In the current setup, non-operator role threads can read/write project files
-  if the host tool grants those permissions.
-- The orchestrator still performs canonical writes for core framework artifacts
-  such as backlog/state/log/dashboard updates.
+Important reality check: this project was built and tested around **OpenAI Codex CLI**. In theory it can work with other CLI-based providers, including options like **Claude Code**, but only after the matching adapter in `runner/adapters/` is actually implemented and validated. Right now, non-Codex adapters should be treated as stubs and extension points, not drop-in replacements.
 
-## 2. Start A New Project
+## Why It Feels Different
 
-To use this framework for a new project:
+- `One human-facing control plane.` `Operator` is your project manager. You talk to one role; it coordinates the rest.
+- `A real project ledger.` `backlog.md` is the source of truth for ownership, status, milestones, and dependencies.
+- `Live visibility.` The dashboard exposes setup state, settings, documents, tasks, cross-role activity, and per-agent history.
+- `Auditable output.` State is persisted in Markdown, YAML, and JSONL files inside the repo.
+- `Extensible by design.` Roles are fully customizable. Built-in agents live in `agents/roles/`, reusable guidance lives in `superpowers/`, and adapters live in `runner/adapters/`.
+
+## How It Runs
+
+AgentSquadTurbo works as a hybrid system:
+
+- `CLI layer`: the local Python orchestrator, validation commands, and dashboard server run from the command line.
+- `Operator layer`: you can work with the `Operator` agent from a CLI session or from inside an embedded agent environment in your editor, for example VS Code with Codex.
+- `Adapter layer`: specialized agent invocations are routed through `host.primary_adapter` and `host.adapter_command`, which define which assistant CLI is used behind the scenes.
+
+That means this project is not just a prompt pack for an IDE plugin, and it is not just a headless CLI runner either. It is designed to connect both:
+
+- local files, logs, backlog, and dashboard on disk
+- a CLI or IDE-resident Operator workflow for human collaboration
+- CLI-driven role execution through an adapter
+
+## Quick Start
+
+### Requirements
+
+- Python 3
+- Node.js and npm
+- One AI coding assistant with a working adapter integration
+  - `Codex` is the default and tested path, so OpenAI Codex CLI should work out of the box once installed.
+  - Other assistants such as `Claude Code`, `Cline`, `Cursor`, and similar tools can be used too, but only after you implement and configure a working adapter in `runner/adapters/`.
+- A CLI workflow, an IDE-embedded agent workflow, or both, depending on how you want to interact with `Operator`
+
+Best results come from keeping the files you want agents to manage **inside this repository**. External paths can fail under sandbox defaults and reduce audit/dashboard coverage.
+
+### Setup
 
 1. Clone this repository into a new project directory.
-2. Install and start the local server:
+2. Install the local launcher dependencies:
 
 ```bash
 npm install
+```
+
+3. Start the local server:
+
+```bash
 npm run dev
 ```
 
-This launches the dashboard and API at `http://127.0.0.1:4173`.
-3. Open the dashboard URL and complete the **Initialize** tab:
-   - Fill all required project details fields and submit.
-   - Optional: adjust settings and enable/disable agents in the **Project** tab.
-4. Confirm your IDE assistant is supported by a functional adapter in
-   [`runner/adapters/`](runner/adapters/) (look for a real implementation, not a stub).
-5. Keep project/product files you want agents to manage inside this cloned
-   `AgentSquad` directory (for example under `project/`, `docs/`, or another
-   in-repo folder).
-6. Open the cloned folder in your IDE agent environment.
-7. Start a fresh IDE agent thread and use this short prompt:
+4. Open the dashboard in your browser:
+
+```text
+http://127.0.0.1:4173/
+```
+
+5. Complete project setup in the dashboard:
+   - In `Project`, fill in `project.id`, `project.name`, `Project goals`, `Target users`, `Key constraints`, `Primary deliverables`, and `Acceptance criteria`, then click `Submit Project Details`.
+   - In `Settings`, review the adapter settings, decide which agents should stay enabled for this project, disable the roles you do not need, and click `Apply Settings` to confirm role review.
+   - Remember that all built-in agents are enabled by default, and you can also customize those roles or add your own later.
+6. Invoke `Operator` from either workflow:
+   - `CLI workflow`: Initialize a fresh agent thread rooted in this repo and send:
+   - `IDE workflow`: Open this project's directory and start a fresh agent thread:
 
 ```text
 Read AGENTS.md and initialize this thread as AgentSquad Operator
 ```
 
-8. The IDE agent should run required bootstrap commands automatically:
-   - generate `project/state/operator-bootstrap.md`
-   - load and follow that packet
-9. Complete Operator role enablement review:
-   - Operator proposes roles to disable (all roles are enabled by default)
-   - You confirm one of: `apply-recommendations`, `keep-all`, or `custom`
-   - Operator records confirmation in `project/config/project.yaml` (`roles.review_confirmed: true`)
-10. After initialization reaches `READY`, provide your first project request.
+7. Explain your project to `Operator` and ask it to turn your goals into backlog tasks with clear ownership, statuses, milestones, and dependencies.
+8. When you're satisfied with the backlog, instruct `Operator` to dispatch specialized agents to execute that backlog while you monitor progress in real time through the dashboard `Tasks`, `Activity Log`, and `Agents` views.
 
-Note: in an ideal environment, users should not manually run bootstrap CLI
-steps. Initialization should be handled by the IDE agent thread.
+Example first request for either CLI or IDE use:
 
-## 3. Dashboard
+```text
+Plan and execute a v1 implementation backlog for this project. Break the work into clear tasks, assign the right specialized agents, and keep the dashboard updated as the team progresses.
+```
 
-AgentSquad runs a local Python dashboard server with live updates. The dashboard includes:
+## What Happens After Initialization
 
-- `Project`: project-details form for first-run setup before IDE initialization
-- `Settings`: project summary, execution policy, role counts, state/halt info
-- `Documents`: browser-friendly rendering of included markdown deliverables
-- `Tasks`: backlog table with sort/filter controls and live updates
-- `Activity Log`: global timeline across all roles with live updates
-- `Agents`: per-role tabs with role context and individual activity timeline
-- `Project Settings`: direct apply to `project/config/project.yaml` (including role enable/disable)
+1. `Operator` runs the bootstrap flow, loads the required context files, and checks the initialization gate.
+2. Your request is turned into backlog work owned by non-operator specialized agents.
+3. The orchestrator selects the next executable task based on dependencies and enabled roles.
+4. Specialized agents execute sequentially, return structured results, and hand control back to `Operator`.
+5. The framework validates contracts, writes canonical state updates, and refreshes logs/dashboard output.
 
-Color accents are role-specific and configurable in
-`project/config/project.yaml` under `dashboard.agent_colors`.
+`Operator` is the only role that talks directly to the human, but it does **not** own backlog implementation tasks.
 
-Structured activity events are written to:
+## The Three Big Selling Points
 
-- `project/state/activity-log.jsonl` (global)
-- `project/workspaces/<role-id>/activity.jsonl` (per role)
+### 1. Be The CEO Of Your Own Bot Team
 
-Markdown run journals remain in `project/workspaces/<role-id>/runs/`.
+AgentSquadTurbo ships with a large built-in roster of specialized agents. Out of the box you have roles for:
 
-Primary dashboard URL:
+- product and design
+- UX research and UX writing
+- architecture and technical planning
+- implementation across many stacks
+- QA and release readiness
+- security and privacy
+- localization and audio
 
-- `http://127.0.0.1:4173/`
+All roles are enabled by default. The `Settings` tab is where you trim the roster down to the team your project actually needs. You are not locked into the included catalog either: the built-in agents are editable, their instructions can be extended, and you can create entirely new agents for project-specific workflows.
 
-Optional static export path (for offline snapshot sharing):
+### 2. Manage The Project Through A Structured Backlog
 
-- `project/state/dashboard.html`
+The framework runs on `backlog.md`, not vague memory. Each task row uses this schema:
 
-## 4. Settings Reference
+```text
+Task ID | Title | Description | Owner | Milestone | Status | Dependencies
+```
 
-This section documents the settings editable in the **Settings** tab.
+That gives you a simple but useful control surface:
 
-### 4.1 Role Controls
+- every task has an explicit owner
+- tasks can be dependency-blocked until upstream work is `Done`
+- statuses are normalized to `Todo`, `In Progress`, `Blocked`, `In Validation`, and `Done`
+- `Operator` mediates handoffs instead of letting roles silently re-route work
 
-- `roles.enabled` / `roles.disabled`
-  - Type: list of role IDs
-  - Purpose: controls which specialist agents are available for orchestration.
-  - Behavior:
-    - Roles in `enabled` and not in `disabled` are selectable owners for tasks.
-    - Roles in `disabled` are excluded from execution selection.
-    - `operator` is required and cannot be disabled.
+### 3. See What Your Agents Actually Did
 
-### 4.2 Host Settings
+The local dashboard gives you a clear view of how the framework is operating:
 
-- `host.primary_adapter`
-  - Type: string enum
-  - UI values:
-    - `antigravity`
-    - `claude-code`
-    - `cline`
-    - `codex`
-    - `continue`
-    - `cursor`
-    - `gemini-code-assist`
-    - `github-copilot`
-    - `kiro`
-    - `roo`
-    - `windsurf`
-  - Purpose: selects which adapter implementation the orchestrator uses for role invocations.
-  - Current practical support:
-    - functional: `codex`
-    - others are registered but stubbed unless you implement the adapter.
+- `Project`: first-run intake and initialization status
+- `Settings`: adapter config, role selection, execution policy, and dashboard settings
+- `Documents`: rendered Markdown from `README.md`, `project/context`, `project/docs`, and `docs`
+- `Tasks`: sortable/filterable backlog view
+- `Activity Log`: cross-role timeline backed by JSONL logs
+- `Agents`: per-role context plus individual activity history
 
-- `host.adapter_command`
-  - Type: string (required)
-  - Purpose: shell command used to invoke the selected adapter.
-  - Scope note:
-    - The flag guidance below is for `host.primary_adapter: codex`.
-    - Other adapter providers may use different flag names and invocation semantics.
-  - Behavior:
-    - must be non-empty.
-    - incorrect command/value will cause invocation failures and possible orchestration halt.
-  - How `exec` is handled in AgentSquadTurbo (`codex` adapter):
-    - If your string includes `exec`, everything before `exec` is treated as base command args and everything after `exec` is treated as default exec args.
-    - If your string omits `exec`, AgentSquadTurbo inserts `exec` automatically at runtime.
-    - Backward compatibility: if `--ephemeral` is placed before `exec`, the adapter moves it into exec-args position.
-    - Runtime-managed flags (`resume`, `--json`, `--output-last-message`) are appended by the adapter and should not be manually embedded in `host.adapter_command`.
-  - Project default string:
-    - `codex --sandbox workspace-write --ask-for-approval never exec --ephemeral`
-    - What it does:
-      - `codex`: selects the Codex CLI executable.
-      - `--sandbox workspace-write`: allows file writes inside the workspace/repo.
-      - `--ask-for-approval never`: disables interactive approval prompts.
-      - `exec`: runs in non-interactive execution mode.
-      - `--ephemeral`: uses ephemeral sessions for role invocations.
-  - Common flags you may use (Codex-style):
-    - `--sandbox workspace-write`: workspace-limited editing.
-    - `--ask-for-approval never`: unattended operation without approval prompts.
-    - `exec`: explicit split point between base args and exec args.
-    - `--ephemeral`: fresh/ephemeral execution sessions.
-    - `--add-dir <path>`: grants adapter access to an additional directory outside the repo.
-    - `--dangerously-bypass-approvals-and-sandbox`: disables sandboxing and approvals entirely (extremely dangerous; use only in externally sandboxed environments).
-  - Complete example command strings:
-    - Default project command:
-      - `codex --sandbox workspace-write --ask-for-approval never exec --ephemeral`
-    - Same style with extra external directory access:
-      - `codex --sandbox workspace-write --ask-for-approval never exec --ephemeral --add-dir ../shared-specs`
-    - Backward-compatible style (no explicit `exec`; runtime inserts it):
-      - `codex --sandbox workspace-write --ask-for-approval never --ephemeral`
-    - Minimal explicit exec form (less constrained than default):
-      - `codex exec --ephemeral`
-    - Dangerous full-bypass example (not recommended):
-      - `codex --dangerously-bypass-approvals-and-sandbox exec --ephemeral`
+Live updates are pushed over `SSE` at `/api/events`. Useful JSON endpoints include:
 
-- `host.session_mode`
-  - Type: string enum
-  - Values:
-    - `per-role-threads`: preserves thread/session continuity per role.
-    - `stateless`: treats each invocation as isolated.
-  - Purpose: controls context/session persistence strategy.
+- `/api/dashboard`
+- `/api/project`
+- `/api/tasks`
+- `/api/activity`
+- `/api/agents`
+- `/api/settings`
+- `/api/init/status`
 
-- `host.context_rot_guardrails.max_turns_per_role_session`
-  - Type: integer > 0
-  - Purpose: forces session turnover after N turns per role to limit stale-context drift.
+Structured activity is persisted to:
 
-- `host.context_rot_guardrails.max_session_age_minutes`
-  - Type: integer > 0
-  - Purpose: forces session turnover after time threshold to reduce long-lived context drift.
+- `project/state/activity-log.jsonl`
+- `project/workspaces/<role-id>/activity.jsonl`
 
-- `host.context_rot_guardrails.force_reload_on_context_change`
-  - Type: boolean
-  - Values:
-    - `true`: reloads role context manifest when context inputs change.
-    - `false`: allows reuse without forced reload on context-file updates.
-  - Purpose: controls strictness of context freshness.
+Per-role run journals are written under:
 
-### 4.3 Execution Settings
+- `project/workspaces/<role-id>/runs/`
 
-- `execution.mode`
-  - Type: string enum
-  - Value:
-    - `sequential`
-  - Purpose: defines global orchestration execution style.
-  - Note: current framework constrains execution to sequential mode.
+The normal dashboard is the live local server. Static export to `project/state/dashboard.html` is optional.
 
-- `execution.handoff_authority`
-  - Type: string enum
-  - Value:
-    - `operator-mediated`
-  - Purpose: requires Operator to coordinate/mediate handoff and task planning updates.
+## Settings That Matter
 
-- `execution.selection_policy`
-  - Type: string enum
-  - Value:
-    - `dependency-fifo`
-  - Purpose: selects the next executable task based on dependency satisfaction and FIFO order.
+Most of the settings you actually care about live in `project/config/project.yaml`.
 
-- `execution.unexpected_event_policy`
-  - Type: string enum
-  - Values:
-    - `errors-only`: continue through warnings, halt on errors.
-    - `errors-or-warnings`: halt on warnings and errors.
-    - `proceed`: continue despite warnings/errors unless another hard-stop condition triggers.
-  - Purpose: controls strictness when unexpected events are emitted by role execution.
+| Setting | What it controls | Practical note |
+| --- | --- | --- |
+| `host.primary_adapter` | Which CLI adapter runs role invocations | Use `codex` by default unless you implement another adapter such as `claude-code` |
+| `host.adapter_command` | The exact command used to invoke the adapter | Default: `codex --sandbox workspace-write --ask-for-approval never exec --ephemeral` |
+| `host.session_mode` | Whether roles run statelessly or keep per-role session continuity | Valid values: `stateless`, `per-role-threads` |
+| `host.context_rot_guardrails.*` | Session rollover guardrails | Controls max turns, max age, and forced reload on context change |
+| `roles.enabled` / `roles.disabled` | Which specialized agents can own work | `operator` must remain enabled |
+| `roles.review_confirmed` | Initialization gate confirmation for role review | The dashboard sets this when you apply role choices in `Settings` |
+| `execution.unexpected_event_policy` | Whether warnings/errors force a return to human control | Valid values: `errors-only`, `errors-or-warnings`, `proceed` |
+| `dashboard.docs.include_paths` / `dashboard.docs.exclude_globs` | Which Markdown files appear in `Documents` | Defaults cover `project/docs`, `docs`, and `project/context` |
+| `dashboard.agent_colors` | Per-role dashboard accent colors | Must be unique hex colors |
+| `dashboard.output_file` | Output path for optional static dashboard export | Default: `project/state/dashboard.html` |
 
-### 4.4 Dashboard Settings
+Notes:
 
-- `dashboard.output_file`
-  - Type: string path (required)
-  - Purpose: target path for static dashboard rendering output.
-  - Typical value:
-    - `project/state/dashboard.html`
+- The framework is intentionally constrained to `execution.mode: sequential`, `execution.handoff_authority: operator-mediated`, and `execution.selection_policy: dependency-fifo`.
+- For the Codex adapter, runtime-managed flags like `resume`, `--json`, and `--output-last-message` are appended by the adapter. Do not hardcode them into `host.adapter_command`.
+- If you want to use another provider, you need both a real CLI command and a real adapter implementation. For example, `host.primary_adapter: claude-code` is only viable after `runner/adapters/claude_code.py` is implemented instead of left as a stub.
+- Dashboard refresh behavior is intentionally fixed to `after-every-step`, and dashboard write failures are intentionally non-blocking.
 
-- `dashboard.refresh_policy`
-  - Type: string enum
-  - Value:
-    - `after-every-step`
-  - Purpose: controls snapshot refresh cadence for static dashboard output.
+## Manual CLI Commands
 
-- `dashboard.failure_mode`
-  - Type: string enum
-  - Value:
-    - `non-blocking-log`
-  - Purpose: controls how dashboard write failures are handled.
-  - Behavior:
-    - logs warning/failure without hard-stopping orchestration.
+Most day-to-day use should happen through the dashboard plus either a CLI Operator session or an IDE Operator thread, while the raw CLI commands remain useful for validation and troubleshooting.
 
-## 5. CLI
+### Python Commands
 
-Recommended npm commands from repository root:
+```bash
+python -m runner.server
+python -m runner.orchestrator bootstrap-operator --print-packet
+python -m runner.orchestrator validate
+python -m runner.orchestrator run --request "your request"
+python -m runner.orchestrator step
+python -m runner.orchestrator resume
+python -m runner.orchestrator render-dashboard
+```
+
+### npm Shortcuts
 
 ```bash
 npm run dev
 npm run validate
-npm run step
 npm run run -- --request "your request"
+npm run step
 npm run resume
 ```
 
-Equivalent Python commands are still available:
+## Repository Layout
 
-```bash
-python -m runner.orchestrator init
-python -m runner.server
-python -m runner.orchestrator bootstrap-operator --print-packet
-python -m runner.orchestrator validate
-python -m runner.orchestrator render-dashboard
-python -m runner.orchestrator run --request "your request"
-python -m runner.orchestrator step
-python -m runner.orchestrator resume
+```text
+agents/                    role registry + role definitions
+backlog.md                 canonical task ledger
+project/config/            project settings
+project/context/           shared project context and docs
+project/state/             orchestration state, logs, dashboard snapshot
+project/workspaces/        per-role notes, activity, and run journals
+runner/                    orchestrator, local server, dashboard, adapters
+steering/                  global execution and governance rules
+superpowers/               reusable capability instructions referenced by roles
 ```
 
-These commands are intentionally available for manual control/troubleshooting.
-In an ideal setup, most invocation is performed by Operator and role agents, not
-the human.
+## Extending AgentSquadTurbo
 
-## 6. Host Adapter
+You can extend the framework in three main directions:
 
-This framework was built and tested using OpenAI Codex CLI as the host adapter.
-It can theoretically work with other providers if they support similar
-local-CLI invocation semantics and session behavior.
+1. Add or edit roles in `agents/roles/<role-id>/agent-role.md`, then register them in `agents/registry.yaml`.
+2. Add reusable guidance in `superpowers/` and reference those superpower IDs from role frontmatter.
+3. Implement new host adapters in `runner/adapters/` if you want to run on a non-Codex CLI such as Claude Code.
 
-Configuration:
+The included agents are meant to be a foundation, not a locked box. You can adjust existing role behavior, add brand-new roles, and combine that with custom adapters if you want the framework to fit a different stack or provider model.
 
-- `host.primary_adapter` (adapter ID)
-- `host.adapter_command` (local command executable)
+The dashboard automatically picks up project Markdown from the configured document include paths, so project-specific docs can become visible without building a separate UI.
 
-Current adapter support status:
+## Guardrails And Current Limits
 
-- Functional implementation: `codex`
-- Registered stubs (not implemented): `roo`, `kiro`, `claude-code`,
-  `antigravity`, `cursor`, `github-copilot`, `continue`, `cline`, `windsurf`,
-  `gemini-code-assist`
-
-If you use a non-Codex provider, you must implement and test its adapter first.
-
-The runner passes prompt data through:
-
-- `STDIN`
-- `AGENTSQUAD_PROMPT` environment variable
-
-## 7. Threaded Role Sessions
-
-AgentSquad supports persistent per-role threads so context is not rebuilt from
-scratch every turn.
-
-Configure in `project/config/project.yaml`:
-
-- `host.session_mode`: `per-role-threads` or `stateless`
-- `host.context_rot_guardrails.max_turns_per_role_session`
-- `host.context_rot_guardrails.max_session_age_minutes`
-- `host.context_rot_guardrails.force_reload_on_context_change`
-- `execution.unexpected_event_policy`: `errors-only` | `errors-or-warnings` | `proceed`
-
-How it works:
-
-1. Orchestrator selects the next role/task.
-2. Adapter invokes that role thread via local CLI.
-3. JSON contract is validated.
-4. Orchestrator persists canonical state updates.
-5. Dashboard/logs are refreshed.
-
-File access behavior:
-
-- Non-operator role threads can read/write project files in this setup (subject
-  to host tool permissions/sandbox).
-- Operator is not the only writer.
-- Orchestrator still owns critical framework writes and validation pathways for
-  backlog/state/log/dashboard consistency.
-- Keeping managed files outside the `AgentSquad` repository can cause access
-  failures under adapter sandbox defaults and can reduce audit visibility.
-- External-path workflows may require relaxed adapter flags (`--add-dir`,
-  sandbox bypass, approval changes), which increases safety and reproducibility
-  risk.
-- After initialization is `READY`, edits to `project/config/**`,
-  `project/context/**`, and `steering/**` require explicit human approval.
-- Operator invocations force full context reload (no Operator session reuse) and
-  emit explicit `context_reload` log events to reduce context-rot risk.
-
-## 8. Validation Guarantees
-
-Validation and runtime guardrails are designed to keep orchestration safe,
-deterministic, and auditable.
-
-Framework/config integrity checks include:
-
-- required scaffold files exist
-- role files exist for enabled roles
-- role frontmatter contract keys are present
-- referenced superpower IDs are valid
-- backlog header schema is exact
-- execution policy keys are constrained (`sequential`, `operator-mediated`, `dependency-fifo`)
-- unexpected-event policy value is constrained
-- dashboard config shape is validated
-
-Runtime contract and execution safeguards include:
-
-- strict context load order enforcement
-- one retry for invalid JSON, then halt with reason
-- initialization gate must pass before work execution
-- role review confirmation is required before initialization can become `READY`
-- task ownership forbids `owner: operator`
-- `operator_plan` must actually modify `backlog.md` or is rejected
-- operator-mediated reassignment for invalid/disabled ownership conditions
-- journaling/state persistence on each step
-- best-effort dashboard refresh after key events and halt paths
+- The default and only production-ready adapter in this repo is `codex`, which was the build-and-test target for this project.
+- Other providers can be supported in principle, but only if their adapter stubs are filled out and tested. That includes `claude-code`, which is currently registered but not implemented.
+- Execution is intentionally sequential. This framework optimizes for traceability and predictable handoffs, not maximum parallelism.
+- `operator` cannot own backlog tasks.
+- After initialization is `READY`, edits to `project/config/**`, `project/context/**`, and `steering/**` require explicit human approval.
+- Validation checks cover backlog schema, enabled-role integrity, role frontmatter, config shape, and dashboard config.
+- Invalid runtime contracts trigger retry-then-halt behavior instead of silent corruption.
