@@ -6,15 +6,21 @@
 
 ## Mandatory Context Load Order
 
-1. `C:/Users/jayau/Desktop/Code/AgentSquad/steering/00-core-rules.md`
-1. `C:/Users/jayau/Desktop/Code/AgentSquad/steering/01-context-lifecycle.md`
-1. `C:/Users/jayau/Desktop/Code/AgentSquad/steering/02-backlog-governance.md`
-1. `C:/Users/jayau/Desktop/Code/AgentSquad/steering/03-handoff-protocol.md`
-1. `C:/Users/jayau/Desktop/Code/AgentSquad/agents/roles/operator/agent-role.md`
-1. `C:/Users/jayau/Desktop/Code/AgentSquad/project/context/project-context.md`
-1. `C:/Users/jayau/Desktop/Code/AgentSquad/agents/roles/operator/recent_activity.md`
+1. `C:/Users/jayau/Desktop/Code/AgentSquadTurbo/steering/00-core-rules.md`
+1. `C:/Users/jayau/Desktop/Code/AgentSquadTurbo/steering/01-context-lifecycle.md`
+1. `C:/Users/jayau/Desktop/Code/AgentSquadTurbo/steering/02-backlog-governance.md`
+1. `C:/Users/jayau/Desktop/Code/AgentSquadTurbo/steering/03-handoff-protocol.md`
+1. `C:/Users/jayau/Desktop/Code/AgentSquadTurbo/agents/roles/operator/agent-role.md`
+1. `C:/Users/jayau/Desktop/Code/AgentSquadTurbo/project/context/project-context.md`
+1. `C:/Users/jayau/Desktop/Code/AgentSquadTurbo/agents/roles/operator/recent_activity.md`
 
 ## Initialization Gate Status
+
+### Initialization Checklist
+
+- Project setup complete (dashboard `Project` tab): `no`
+  - Required fields are still missing. Direct the user to `Project` tab and offer to draft text for required fields.
+- Role review complete (dashboard `Settings` tab): `no`
 
 Status: `BLOCKED`
 
@@ -29,6 +35,8 @@ Complete these items before invoking any non-Operator role:
 - project/context/project-context.md: fill 'Acceptance criteria' with project-specific content.
 
 ## What To Send Next (Copy/Paste Template)
+
+First, direct the user to the dashboard `Project` tab to complete setup fields. Offer to draft candidate text for any field if they want help.
 
 Reply with values for all 7 fields below. Keep each answer specific and concrete.
 Avoid placeholders such as `TBD`, `N/A`, or `Unknown`.
@@ -95,6 +103,9 @@ Acceptance criteria.detail: <objective checks + approver + evidence>
 
 ## Role Enablement Review
 
+Direct the user to the dashboard `Settings` tab for role enable/disable review.
+Offer to recommend a disable list from project goals/users/constraints/deliverables.
+
 All roles are enabled by default. Operator should recommend a smaller active role set for this project and wait for explicit user confirmation before proceeding.
 
 - Current enabled roles: `166`
@@ -108,15 +119,19 @@ After goals/users/constraints/deliverables/acceptance criteria are filled, Opera
 ## Operator Procedure
 
 1. Load mandatory context in the order above.
-2. If gate is blocked, ask targeted questions and update:
-   - `project/context/project-context.md`
-   - `project/config/project.yaml`
-3. If required fields are present but thin, run optional deep-dive intake questions before planning.
-4. Run role enablement review: propose disable recommendations and wait for explicit user confirmation.
+2. Check initialization checklist status before planning:
+   - Project setup complete (dashboard `Project` tab)
+   - Role review complete (dashboard `Settings` tab)
+3. If project setup is incomplete, direct user to `Project` tab and offer drafting help.
+4. If project setup is complete but role review is pending:
+   - direct user to `Settings` tab
+   - propose role enable/disable recommendations
+   - wait for explicit confirmation
 5. Update `roles.review_confirmed: true` after confirmation.
-6. After initialization is READY, do not edit `project/config/**`, `project/context/**`, or `steering/**` without explicit human approval (`governance_file_edits_approved: true` or `[ALLOW-GOVERNANCE-EDITS]`).
-7. Do not invoke work agents until gate is `READY`.
-8. Once ready, collect user request and produce `operator_plan` JSON only.
+6. If required fields are present but thin, run optional deep-dive intake questions before planning.
+7. After initialization is READY, do not edit `project/config/**`, `project/context/**`, or `steering/**` without explicit human approval (`governance_file_edits_approved: true` or `[ALLOW-GOVERNANCE-EDITS]`).
+8. Do not invoke work agents until gate is `READY`.
+9. Once ready, collect user request and produce `operator_plan` JSON only.
 
 ## Enabled Roles
 

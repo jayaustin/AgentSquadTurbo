@@ -1531,6 +1531,11 @@ def _bootstrap_intake_lines(root: Path, config: dict[str, Any]) -> list[str]:
 
     lines.append("## What To Send Next (Copy/Paste Template)")
     lines.append("")
+    lines.append(
+        "First, direct the user to the dashboard `Project` tab to complete setup fields. "
+        "Offer to draft candidate text for any field if they want help."
+    )
+    lines.append("")
     lines.append("Reply with values for all 7 fields below. Keep each answer specific and concrete.")
     lines.append("Avoid placeholders such as `TBD`, `N/A`, or `Unknown`.")
     lines.append("")
@@ -1561,6 +1566,44 @@ def _bootstrap_intake_lines(root: Path, config: dict[str, Any]) -> list[str]:
     return lines
 
 
+def _bootstrap_initialization_checklist_lines(
+    config: dict[str, Any],
+    base_init_issues: list[str],
+) -> list[str]:
+    lines: list[str] = []
+    project_setup_complete = len(base_init_issues) == 0
+    review_confirmed = _role_review_confirmed(config)
+    role_review_complete = project_setup_complete and review_confirmed
+
+    lines.append("### Initialization Checklist")
+    lines.append("")
+    lines.append(
+        f"- Project setup complete (dashboard `Project` tab): "
+        f"`{'yes' if project_setup_complete else 'no'}`"
+    )
+    if not project_setup_complete:
+        lines.append(
+            "  - Required fields are still missing. Direct the user to `Project` tab and "
+            "offer to draft text for required fields."
+        )
+    lines.append(
+        f"- Role review complete (dashboard `Settings` tab): "
+        f"`{'yes' if role_review_complete else 'no'}`"
+    )
+    if project_setup_complete and not role_review_complete:
+        lines.append(
+            "  - Ask the user to review enabled/disabled roles on `Settings` tab, then confirm "
+            "apply-recommendations, keep-all, or custom."
+        )
+        lines.append(
+            "  - Offer to generate role recommendations from project goals/users/constraints/deliverables."
+        )
+    if role_review_complete:
+        lines.append("  - Role review confirmation is recorded and initialization can proceed.")
+    lines.append("")
+    return lines
+
+
 def _bootstrap_role_review_lines(
     root: Path,
     config: dict[str, Any],
@@ -1577,6 +1620,13 @@ def _bootstrap_role_review_lines(
     review_confirmed = _role_review_confirmed(config)
 
     lines.append("## Role Enablement Review")
+    lines.append("")
+    lines.append(
+        "Direct the user to the dashboard `Settings` tab for role enable/disable review."
+    )
+    lines.append(
+        "Offer to recommend a disable list from project goals/users/constraints/deliverables."
+    )
     lines.append("")
     lines.append(
         "All roles are enabled by default. Operator should recommend a smaller active role set "
@@ -1677,6 +1727,7 @@ def _operator_bootstrap_packet(
     lines.append("")
     lines.append("## Initialization Gate Status")
     lines.append("")
+    lines.extend(_bootstrap_initialization_checklist_lines(config, base_init_issues))
     if init_issues:
         lines.append("Status: `BLOCKED`")
         lines.append("")
@@ -1704,27 +1755,28 @@ def _operator_bootstrap_packet(
     lines.append("## Operator Procedure")
     lines.append("")
     lines.append("1. Load mandatory context in the order above.")
-    lines.append("2. If gate is blocked, ask targeted questions and update:")
-    lines.append("   - `project/context/project-context.md`")
-    lines.append("   - `project/config/project.yaml`")
-    lines.append(
-        "3. If required fields are present but thin, run optional deep-dive intake "
-        "questions before planning."
-    )
-    lines.append(
-        "4. Run role enablement review: propose disable recommendations and wait "
-        "for explicit user confirmation."
-    )
+    lines.append("2. Check initialization checklist status before planning:")
+    lines.append("   - Project setup complete (dashboard `Project` tab)")
+    lines.append("   - Role review complete (dashboard `Settings` tab)")
+    lines.append("3. If project setup is incomplete, direct user to `Project` tab and offer drafting help.")
+    lines.append("4. If project setup is complete but role review is pending:")
+    lines.append("   - direct user to `Settings` tab")
+    lines.append("   - propose role enable/disable recommendations")
+    lines.append("   - wait for explicit confirmation")
     lines.append(
         f"5. Update `roles.{ROLE_REVIEW_CONFIRMATION_KEY}: true` after confirmation."
     )
     lines.append(
-        "6. After initialization is READY, do not edit `project/config/**`, "
+        "6. If required fields are present but thin, run optional deep-dive intake "
+        "questions before planning."
+    )
+    lines.append(
+        "7. After initialization is READY, do not edit `project/config/**`, "
         "`project/context/**`, or `steering/**` without explicit human approval "
         "(`governance_file_edits_approved: true` or `[ALLOW-GOVERNANCE-EDITS]`)."
     )
-    lines.append("7. Do not invoke work agents until gate is `READY`.")
-    lines.append("8. Once ready, collect user request and produce `operator_plan` JSON only.")
+    lines.append("8. Do not invoke work agents until gate is `READY`.")
+    lines.append("9. Once ready, collect user request and produce `operator_plan` JSON only.")
     lines.append("")
     lines.append("## Enabled Roles")
     lines.append("")

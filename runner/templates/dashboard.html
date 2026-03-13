@@ -89,6 +89,10 @@
       background: #f59e0b;
       box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.18);
     }
+    .status-role-review-pending .status-dot {
+      background: #facc15;
+      box-shadow: 0 0 0 4px rgba(250, 204, 21, 0.2);
+    }
     .status-operator-not-initialized .status-dot {
       background: #60a5fa;
       box-shadow: 0 0 0 4px rgba(96, 165, 250, 0.18);
@@ -390,6 +394,11 @@
       border-color: rgba(239, 68, 68, 0.45);
       color: #fecaca;
       background: rgba(239, 68, 68, 0.08);
+    }
+    .settings-validation.warn {
+      border-color: rgba(245, 158, 11, 0.45);
+      color: #fde68a;
+      background: rgba(120, 53, 15, 0.28);
     }
     .settings-errors {
       margin: 0;
@@ -1342,7 +1351,10 @@
         : {};
       return {
         is_ready: Boolean(base.is_ready),
+        project_setup_complete: Boolean(base.project_setup_complete),
+        role_review_complete: Boolean(base.role_review_complete),
         missing_fields: Array.isArray(base.missing_fields) ? base.missing_fields : [],
+        pending_items: Array.isArray(base.pending_items) ? base.pending_items : [],
         operator_init_prompt: String(base.operator_init_prompt || "Read AGENTS.md and initialize this thread as AgentSquad Operator"),
         fields: {
           project_id: String(fields.project_id || ""),
@@ -1690,13 +1702,24 @@
       const hasRunContext = hasRunId || Boolean(activeRole) || Boolean(currentRequest) ||
         Boolean(lastCompletedTaskId) || hasOperatorActivity;
 
-      if (!init.is_ready) {
+      if (!init.project_setup_complete) {
         return {
           label: "Setup Required",
           className: "status-setup-required",
           action: {
             label: "Open Project Tab",
             tabId: "init"
+          }
+        };
+      }
+
+      if (!init.role_review_complete) {
+        return {
+          label: "Role Review Required",
+          className: "status-role-review-pending",
+          action: {
+            label: "Open Settings Tab",
+            tabId: "project"
           }
         };
       }
@@ -1870,7 +1893,7 @@
           },
           body: JSON.stringify(payload)
         });
-        initStatusText = "Project details saved. Open README in Documents tab for Operator initialization steps.";
+        initStatusText = "Project details saved. Next step: review roles in Settings and click Apply Settings.";
         await refreshDashboardData();
         activeTab = "project";
         renderTabs();
@@ -1891,9 +1914,31 @@
       const fields = init.fields;
       const errors = initValidationErrors(fields);
       const missing = init.missing_fields || [];
+      const pendingItems = init.pending_items || [];
       const serverHint = HAS_API ? "" : "Direct submit requires the local server URL (http://127.0.0.1:4173).";
       const editingLocked = settingsEditingLocked();
       const submitDisabled = initSubmitInFlight || !HAS_API || editingLocked;
+      const projectSetupComplete = Boolean(init.project_setup_complete);
+      const roleReviewComplete = Boolean(init.role_review_complete);
+      const roleReviewPending = projectSetupComplete && !roleReviewComplete;
+      const pendingItemsHtml = pendingItems.length
+        ? '<ul class="init-errors">' + pendingItems.map(item => "<li>" + esc(item) + "</li>").join("") + "</ul>"
+        : "";
+      const initStatusCardHtml = !projectSetupComplete
+        ? (
+          '<div class="settings-validation error"><strong>Missing required fields:</strong><ul class="init-errors">' +
+          (missing.length
+            ? missing.map(item => "<li>" + esc(item) + "</li>").join("")
+            : "<li>Complete required initialization details.</li>") +
+          "</ul></div>"
+        )
+        : roleReviewPending
+          ? (
+            '<div class="settings-validation warn"><strong>Role review pending:</strong> ' +
+            'Open the <a href="#" id="init-role-review-link">Settings tab</a>, enable/disable agents as needed, and click Apply Settings to confirm.</div>' +
+            pendingItemsHtml
+          )
+          : '<div class="settings-validation ok">Project setup and role review are complete.</div>';
 
       root.innerHTML = [
         '<section class="init-panel">',
@@ -1901,19 +1946,11 @@
         "<h3>Project Initialization</h3>",
         '<ol class="settings-hint">' +
           "<li>Fill out all required fields on this page and click <strong>Submit Project Details</strong>.</li>" +
-          "<li>Optional: review additional settings and agent enable/disable in the <a href=\"#\" id=\"init-settings-link\">Settings tab</a>.</li>" +
+          "<li>Review agent enable/disable in the <a href=\"#\" id=\"init-settings-link\">Settings tab</a>, then click Apply Settings to confirm role review.</li>" +
           "<li>Open the <a href=\"#\" id=\"init-readme-link\">README document on the Documents tab</a> and follow the Operator initialization instructions.</li>" +
         "</ol>",
         serverHint ? '<p class="settings-hint">' + esc(serverHint) + "</p>" : "",
-        (init.is_ready && !missing.length)
-          ? '<div class="settings-validation ok">Required project details are complete.</div>'
-          : (
-            '<div class="settings-validation error"><strong>Missing required fields:</strong><ul class="init-errors">' +
-            (missing.length
-              ? missing.map(item => "<li>" + esc(item) + "</li>").join("")
-              : "<li>Complete required initialization details.</li>") +
-            "</ul></div>"
-          ),
+        initStatusCardHtml,
         '<div class="init-grid">',
         '<div class="init-field"><label for="init-project-id">Project ID (Required)</label><input id="init-project-id" value="' + esc(fields.project_id) + '" placeholder="acme-subscription-optimizer"></div>',
         '<div class="init-field"><label for="init-project-name">Project Name (Required)</label><input id="init-project-name" value="' + esc(fields.project_name) + '" placeholder="Acme Subscription Optimizer"></div>',
@@ -1938,6 +1975,7 @@
 
       const submitButton = document.getElementById("init-submit-btn");
       const settingsLink = document.getElementById("init-settings-link");
+      const roleReviewLink = document.getElementById("init-role-review-link");
       const docsLink = document.getElementById("init-readme-link");
       const openProjectButton = document.getElementById("init-open-project-btn");
       const submitStatus = document.getElementById("init-submit-status");
@@ -1957,6 +1995,13 @@
       }
       if (settingsLink) {
         settingsLink.addEventListener("click", event => {
+          event.preventDefault();
+          activeTab = "project";
+          renderTabs();
+        });
+      }
+      if (roleReviewLink) {
+        roleReviewLink.addEventListener("click", event => {
           event.preventDefault();
           activeTab = "project";
           renderTabs();
@@ -1982,8 +2027,12 @@
           submitStatus.textContent = initStatusText;
         } else if (editingLocked) {
           submitStatus.textContent = "Edits are locked while orchestration is running. Check IDE Operator thread.";
+        } else if (roleReviewPending) {
+          submitStatus.textContent = "Next step: confirm role review in Settings by clicking Apply Settings.";
         } else if (submitDisabled && errors.length) {
           submitStatus.textContent = "Complete required fields to submit.";
+        } else if (projectSetupComplete && roleReviewComplete) {
+          submitStatus.textContent = "Initialization checklist is complete. Open README and initialize Operator in your IDE.";
         } else if (!HAS_API) {
           submitStatus.textContent = "Start local server to submit initialization.";
         } else {
@@ -2549,6 +2598,8 @@
         return;
       }
       const editingLocked = settingsEditingLocked();
+      const init = initState();
+      const roleReviewPending = Boolean(init.project_setup_complete) && !Boolean(init.role_review_complete);
       const hasRoleChanges = Boolean(roleChanges && roleChanges.hasChanges);
       const hasChanges = changes.length > 0 || hasRoleChanges;
       const hasValidationErrors = Array.isArray(errors) && errors.length > 0;
@@ -2557,13 +2608,41 @@
         : "Direct apply is only available when running the local server (http://...).";
 
       if (!hasChanges) {
+        const canConfirmReview = roleReviewPending && HAS_API && !editingLocked;
         root.innerHTML = [
           "<h4>Apply Settings</h4>",
-          '<p class="settings-hint">No settings or role-state changes detected.</p>',
+          roleReviewPending
+            ? '<p class="settings-hint">No setting changes detected. Confirm current role selection to complete initialization role review.</p>'
+            : '<p class="settings-hint">No settings or role-state changes detected.</p>',
+          roleReviewPending
+            ? (
+              '<div class="settings-prompt-actions">' +
+              '<button type="button" class="settings-copy-btn" id="project-settings-confirm-review-btn">Confirm Current Role Selection</button>' +
+              '<span class="settings-copy-status" id="project-settings-confirm-review-status"></span>' +
+              "</div>"
+            )
+            : "",
           settingsApplyStatus
             ? '<div class="settings-copy-status">' + esc(settingsApplyStatus) + "</div>"
             : ""
         ].join("");
+        const confirmButton = document.getElementById("project-settings-confirm-review-btn");
+        const confirmStatus = document.getElementById("project-settings-confirm-review-status");
+        if (confirmButton) {
+          confirmButton.disabled = settingsApplyInFlight || !canConfirmReview;
+          confirmButton.addEventListener("click", () => {
+            void applyProjectSettings(true);
+          });
+        }
+        if (confirmStatus && roleReviewPending) {
+          if (editingLocked) {
+            confirmStatus.textContent = "Settings are locked while orchestration is running.";
+          } else if (!HAS_API) {
+            confirmStatus.textContent = "Start the local server to confirm role review.";
+          } else {
+            confirmStatus.textContent = "Click to confirm keep-all role selection.";
+          }
+        }
         return;
       }
 
@@ -2621,10 +2700,11 @@
       }
     }
 
-    async function applyProjectSettings() {
+    async function applyProjectSettings(forceRoleReviewConfirm) {
       if (settingsApplyInFlight) {
         return;
       }
+      const forceConfirm = Boolean(forceRoleReviewConfirm);
       if (settingsEditingLocked()) {
         settingsApplyStatus = "Settings are locked while orchestration is running. Check IDE Operator thread.";
         validateProjectSettingsUI();
@@ -2645,7 +2725,7 @@
         validateProjectSettingsUI();
         return;
       }
-      if (!changes.length && !roleChanges.hasChanges) {
+      if (!changes.length && !roleChanges.hasChanges && !forceConfirm) {
         settingsApplyStatus = "No changes detected.";
         validateProjectSettingsUI();
         return;
@@ -2663,7 +2743,7 @@
           },
           body: JSON.stringify(buildSettingsPatchPayload(currentSnapshot, roleChanges))
         });
-        settingsApplyStatus = "Settings applied successfully.";
+        settingsApplyStatus = "Settings applied successfully. Role review confirmed.";
         await refreshDashboardData();
       } catch (error) {
         settingsApplyStatus = "Apply failed: " + String(error.message || error);

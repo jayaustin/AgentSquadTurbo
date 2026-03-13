@@ -36,6 +36,11 @@ REQUIRED_CONTEXT_FIELDS = (
 )
 OPTIONAL_CONTEXT_FIELDS = ("Non-goals",)
 OPERATOR_INIT_PROMPT = "Read AGENTS.md and initialize this thread as AgentSquad Operator"
+ROLE_REVIEW_CONFIRMATION_KEY = "review_confirmed"
+ROLE_REVIEW_PENDING_MESSAGE = (
+    "Role enablement review is pending. Open the Settings tab, review enabled/disabled roles, "
+    "then click Apply Settings to confirm."
+)
 
 
 def utc_now() -> str:
@@ -261,6 +266,13 @@ def _read_notes_section(root: Path) -> str:
     return notes
 
 
+def _role_review_confirmed(config: dict[str, Any]) -> bool:
+    roles_cfg = config.get("roles", {})
+    if not isinstance(roles_cfg, dict):
+        return False
+    return bool(roles_cfg.get(ROLE_REVIEW_CONFIRMATION_KEY, False))
+
+
 def _format_context_markdown(values: dict[str, str], notes: str) -> str:
     non_goals = str(values.get("Non-goals", "")).strip()
     notes_text = str(notes).strip()
@@ -292,6 +304,9 @@ def _format_context_markdown(values: dict[str, str], notes: str) -> str:
 def _initialization_state(root: Path) -> dict[str, Any]:
     config = validators.load_project_config(root)
     project_cfg = config.get("project", {})
+    roles_cfg = config.get("roles", {})
+    if not isinstance(roles_cfg, dict):
+        roles_cfg = {}
     context_values = _context_field_values(root)
     project_id = str(project_cfg.get("id", "")).strip()
     project_name = str(project_cfg.get("name", "")).strip()
@@ -304,10 +319,20 @@ def _initialization_state(root: Path) -> dict[str, Any]:
     for field in REQUIRED_CONTEXT_FIELDS:
         if not _is_value_defined(context_values.get(field, "")):
             missing_fields.append(field)
+    project_setup_complete = len(missing_fields) == 0
+    role_review_complete = _role_review_confirmed(config)
+    pending_items: list[str] = []
+    if not project_setup_complete:
+        pending_items.append("Project details are incomplete on the Project tab.")
+    if project_setup_complete and not role_review_complete:
+        pending_items.append(ROLE_REVIEW_PENDING_MESSAGE)
 
     return {
-        "is_ready": len(missing_fields) == 0,
+        "is_ready": project_setup_complete and role_review_complete,
+        "project_setup_complete": project_setup_complete,
+        "role_review_complete": role_review_complete,
         "missing_fields": missing_fields,
+        "pending_items": pending_items,
         "operator_init_prompt": OPERATOR_INIT_PROMPT,
         "fields": {
             "project_id": project_id if project_id != "sample-project" else "",
@@ -374,6 +399,12 @@ def _apply_initialization_submission(
         updated["project"] = project_cfg
     project_cfg["id"] = project_id
     project_cfg["name"] = project_name
+    roles_cfg = updated.setdefault("roles", {})
+    if not isinstance(roles_cfg, dict):
+        roles_cfg = {}
+        updated["roles"] = roles_cfg
+    # Project details changed, so role review must be reconfirmed against updated context.
+    roles_cfg[ROLE_REVIEW_CONFIRMATION_KEY] = False
 
     config_errors = validators.validate_project_config_data(updated)
     if config_errors:
@@ -531,6 +562,8 @@ def _apply_settings_patch(root: Path, patch_payload: dict[str, Any]) -> tuple[bo
         disabled_roles = [role_id for role_id in disabled_roles if role_id not in set(enabled_roles)]
         roles_cfg["enabled"] = enabled_roles
         roles_cfg["disabled"] = disabled_roles
+        # Treat any settings apply with role payload as explicit role-review confirmation.
+        roles_cfg[ROLE_REVIEW_CONFIRMATION_KEY] = True
 
     errors.extend(validators.validate_project_config_data(updated))
     errors.extend(_validate_role_sets(root, updated))
