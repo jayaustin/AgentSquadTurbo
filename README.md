@@ -179,6 +179,7 @@ Most of the settings you actually care about live in `project/config/project.yam
 | `roles.enabled` / `roles.disabled` | Which specialized agents can own work | `operator` must remain enabled |
 | `roles.review_confirmed` | Initialization gate confirmation for role review | The dashboard sets this when you apply role choices in `Settings` |
 | `execution.unexpected_event_policy` | Whether warnings/errors force a return to human control | Valid values: `errors-only`, `errors-or-warnings`, `proceed` |
+| `dashboard.enabled` | Whether AgentSquad writes the optional static dashboard snapshot during orchestration | Default: `false`; the live local server does not need this |
 | `dashboard.docs.include_paths` / `dashboard.docs.exclude_globs` | Which Markdown files appear in `Documents` | Defaults cover `project/docs`, `docs`, and `project/context` |
 | `dashboard.agent_colors` | Per-role dashboard accent colors | Must be unique hex colors |
 | `dashboard.output_file` | Output path for optional static dashboard export | Default: `project/state/dashboard.html` |
@@ -188,7 +189,8 @@ Notes:
 - The framework is intentionally constrained to `execution.mode: sequential`, `execution.handoff_authority: operator-mediated`, and `execution.selection_policy: dependency-fifo`.
 - For the Codex adapter, runtime-managed flags like `resume`, `--json`, and `--output-last-message` are appended by the adapter. Do not hardcode them into `host.adapter_command`.
 - If you want to use another provider, you need both a real CLI command and a real adapter implementation. For example, `host.primary_adapter: claude-code` is only viable after `runner/adapters/claude_code.py` is implemented instead of left as a stub.
-- Dashboard refresh behavior is intentionally fixed to `after-every-step`, and dashboard write failures are intentionally non-blocking.
+- Static dashboard snapshot generation is disabled by default because the live local server reads current files directly and updates via API/SSE.
+- If you choose to enable static snapshot generation, the refresh behavior is fixed to `after-every-step`, and snapshot write failures are intentionally non-blocking.
 
 ## Manual CLI Commands
 
@@ -205,6 +207,8 @@ python -m runner.orchestrator step
 python -m runner.orchestrator resume
 python -m runner.orchestrator render-dashboard
 ```
+
+Use `python -m runner.orchestrator render-dashboard` only when you explicitly want to refresh the static snapshot at `project/state/dashboard.html`.
 
 ### npm Shortcuts
 

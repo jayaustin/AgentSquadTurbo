@@ -192,7 +192,7 @@ backlog:
     - "In Validation"
     - Done
 dashboard:
-  enabled: true
+  enabled: false
   output_file: project/state/dashboard.html
   refresh_policy: after-every-step
   failure_mode: non-blocking-log

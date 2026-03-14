@@ -19,7 +19,7 @@ DASHBOARD_AGENT_COLOR_DEFAULTS = {
 }
 
 DASHBOARD_DEFAULTS = {
-    "enabled": True,
+    "enabled": False,
     "output_file": "project/state/dashboard.html",
     "refresh_policy": "after-every-step",
     "failure_mode": "non-blocking-log",
