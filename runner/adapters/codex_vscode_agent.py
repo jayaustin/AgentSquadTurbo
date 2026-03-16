@@ -1,4 +1,4 @@
-"""Codex VS Code Agent host adapter."""
+"""Codex VS Code agent host adapter."""
 
 from __future__ import annotations
 

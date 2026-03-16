@@ -4,7 +4,7 @@ from .antigravity import AntiGravityAdapter
 from .base import AdapterError, BaseAdapter
 from .claude_code import ClaudeCodeAdapter
 from .cline import ClineAdapter
-from .codex import CodexVsCodeAgentAdapter
+from .codex_vscode_agent import CodexVsCodeAgentAdapter
 from .codex_cli import CodexCliAdapter
 from .continue_dev import ContinueAdapter
 from .cursor import CursorAdapter
