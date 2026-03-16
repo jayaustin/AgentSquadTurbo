@@ -2,7 +2,7 @@ project:
   id: sample-project
   name: "Sample Project"
 host:
-  primary_adapter: codex
+  primary_adapter: codex-cli
   adapter_command: "codex --sandbox workspace-write --ask-for-approval never exec --ephemeral"
   session_mode: stateless
   context_rot_guardrails:

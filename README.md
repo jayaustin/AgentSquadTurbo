@@ -172,7 +172,7 @@ Most of the settings you actually care about live in `project/config/project.yam
 
 | Setting | What it controls | Practical note |
 | --- | --- | --- |
-| `host.primary_adapter` | Which CLI adapter runs role invocations | Use `codex` by default unless you implement another adapter such as `claude-code` |
+| `host.primary_adapter` | Which CLI adapter runs role invocations | Default: `codex-cli`; use `codex-vscode-agent` for the original VS Code agent-backed adapter |
 | `host.adapter_command` | The exact command used to invoke the adapter | Default: `codex --sandbox workspace-write --ask-for-approval never exec --ephemeral` |
 | `host.session_mode` | Whether roles run statelessly or keep per-role session continuity | Valid values: `stateless`, `per-role-threads` |
 | `host.context_rot_guardrails.*` | Session rollover guardrails | Controls max turns, max age, and forced reload on context change |
@@ -187,7 +187,7 @@ Most of the settings you actually care about live in `project/config/project.yam
 Notes:
 
 - The framework is intentionally constrained to `execution.mode: sequential`, `execution.handoff_authority: operator-mediated`, and `execution.selection_policy: dependency-fifo`.
-- For the Codex adapter, runtime-managed flags like `resume`, `--json`, and `--output-last-message` are appended by the adapter. Do not hardcode them into `host.adapter_command`.
+- For the Codex adapters, runtime-managed flags like `resume`, `--json`, and `--output-last-message` are appended by the adapter. Do not hardcode them into `host.adapter_command`.
 - If you want to use another provider, you need both a real CLI command and a real adapter implementation. For example, `host.primary_adapter: claude-code` is only viable after `runner/adapters/claude_code.py` is implemented instead of left as a stub.
 - Static dashboard snapshot generation is disabled by default because the live local server reads current files directly and updates via API/SSE.
 - If you choose to enable static snapshot generation, the refresh behavior is fixed to `after-every-step`, and snapshot write failures are intentionally non-blocking.
@@ -248,7 +248,7 @@ The dashboard automatically picks up project Markdown from the configured docume
 
 ## Guardrails And Current Limits
 
-- The default and only production-ready adapter in this repo is `codex`, which was the build-and-test target for this project.
+- The built-in Codex adapters are `codex-cli` and `codex-vscode-agent`. The legacy adapter ID `codex` is still accepted as an alias for backward compatibility.
 - Other providers can be supported in principle, but only if their adapter stubs are filled out and tested. That includes `claude-code`, which is currently registered but not implemented.
 - Execution is intentionally sequential. This framework optimizes for traceability and predictable handoffs, not maximum parallelism.
 - `operator` cannot own backlog tasks.

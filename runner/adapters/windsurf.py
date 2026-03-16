@@ -11,5 +11,5 @@ class WindsurfAdapter(BaseAdapter):
     def invoke(self, command: str, prompt: str) -> str:
         raise AdapterError(
             "Windsurf adapter is not implemented yet. "
-            "Keep host.primary_adapter=codex or implement runner/adapters/windsurf.py."
+            "Keep host.primary_adapter=codex-cli or host.primary_adapter=codex-vscode-agent, or implement runner/adapters/windsurf.py."
         )

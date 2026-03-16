@@ -11,6 +11,6 @@ class RooAdapter(BaseAdapter):
     def invoke(self, command: str, prompt: str) -> str:
         raise AdapterError(
             "Roo adapter is not implemented yet. "
-            "Keep primary_adapter=codex or implement runner/adapters/roo.py."
+            "Keep host.primary_adapter=codex-cli or host.primary_adapter=codex-vscode-agent, or implement runner/adapters/roo.py."
         )
 

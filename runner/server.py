@@ -478,7 +478,10 @@ def _apply_settings_patch(root: Path, patch_payload: dict[str, Any]) -> tuple[bo
     host_cfg = updated.setdefault("host", {})
     if isinstance(host_cfg, dict):
         if "primary_adapter" in host_patch:
-            host_cfg["primary_adapter"] = str(host_patch.get("primary_adapter", "")).strip()
+            primary_adapter = str(host_patch.get("primary_adapter", "")).strip()
+            host_cfg["primary_adapter"] = (
+                "codex-vscode-agent" if primary_adapter == "codex" else primary_adapter
+            )
         if "adapter_command" in host_patch:
             host_cfg["adapter_command"] = str(host_patch.get("adapter_command", "")).strip()
         if "session_mode" in host_patch:

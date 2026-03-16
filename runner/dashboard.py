@@ -25,6 +25,13 @@ DEFAULT_FALLBACK_COLORS = [
 ]
 
 
+def _canonical_primary_adapter(value: Any) -> str:
+    adapter = str(value or "").strip()
+    if adapter == "codex":
+        return "codex-vscode-agent"
+    return adapter
+
+
 def _format_utc_timestamp(timestamp: float | int | None) -> str:
     if timestamp is None:
         return ""
@@ -340,7 +347,7 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
         "project": {
             "id": project_info.get("id", ""),
             "name": project_info.get("name", ""),
-            "primary_adapter": host_info.get("primary_adapter", ""),
+            "primary_adapter": _canonical_primary_adapter(host_info.get("primary_adapter", "")),
             "adapter_command": host_info.get("adapter_command", ""),
             "session_mode": host_info.get("session_mode", "stateless"),
             "execution_mode": execution_info.get("mode", ""),
@@ -361,7 +368,7 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
         },
         "settings": {
             "host": {
-                "primary_adapter": str(host_info.get("primary_adapter", "")).strip(),
+                "primary_adapter": _canonical_primary_adapter(host_info.get("primary_adapter", "")),
                 "adapter_command": str(host_info.get("adapter_command", "")).strip(),
                 "session_mode": str(host_info.get("session_mode", "stateless")).strip()
                 or "stateless",

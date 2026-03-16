@@ -386,7 +386,7 @@ def _project_config_seed(role_definitions: dict[str, dict[str, Any]]) -> dict[st
     return {
         "project": {"id": "sample-project", "name": "Sample Project"},
         "host": {
-            "primary_adapter": "codex",
+            "primary_adapter": "codex-cli",
             "adapter_command": "codex --sandbox workspace-write --ask-for-approval never exec --ephemeral",
             "session_mode": "stateless",
             "context_rot_guardrails": {
@@ -409,6 +409,13 @@ def _project_config_seed(role_definitions: dict[str, dict[str, Any]]) -> dict[st
         "backlog": {"statuses": DEFAULT_STATUSES},
         "dashboard": validators.dashboard_config_with_defaults({}),
     }
+
+
+def _canonical_primary_adapter(value: Any) -> str:
+    adapter = str(value or "").strip()
+    if adapter == "codex":
+        return "codex-vscode-agent"
+    return adapter
 
 
 def seed_scaffold(root: Path) -> list[Path]:
@@ -1718,7 +1725,7 @@ def _operator_bootstrap_packet(
     lines.append("")
     lines.append(f"- Project ID: `{project.get('id', '')}`")
     lines.append(f"- Project Name: `{project.get('name', '')}`")
-    lines.append(f"- Primary Adapter: `{host.get('primary_adapter', '')}`")
+    lines.append(f"- Primary Adapter: `{_canonical_primary_adapter(host.get('primary_adapter', ''))}`")
     lines.append("")
     lines.append("## Mandatory Context Load Order")
     lines.append("")

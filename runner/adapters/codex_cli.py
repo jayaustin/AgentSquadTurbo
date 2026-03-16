@@ -1,10 +1,11 @@
-"""Codex VS Code Agent host adapter."""
+"""Codex CLI host adapter."""
 
 from __future__ import annotations
 
 import json
 import os
 import shlex
+import shutil
 import subprocess
 import tempfile
 from pathlib import Path
@@ -12,10 +13,10 @@ from pathlib import Path
 from .base import AdapterError, BaseAdapter, InvocationResult
 
 
-class CodexVsCodeAgentAdapter(BaseAdapter):
-    """Adapter for the original Codex VS Code Agent flow with session continuity."""
+class CodexCliAdapter(BaseAdapter):
+    """Adapter for the standalone Codex CLI binary."""
 
-    adapter_id = "codex-vscode-agent"
+    adapter_id = "codex-cli"
 
     @staticmethod
     def _sanitize_exec_args(args: list[str]) -> list[str]:
@@ -26,7 +27,6 @@ class CodexVsCodeAgentAdapter(BaseAdapter):
             if skip_next:
                 skip_next = False
                 continue
-            # Adapter handles session routing and output plumbing.
             if token in {"resume", "--json"}:
                 continue
             if token == "--output-last-message":
@@ -50,8 +50,6 @@ class CodexVsCodeAgentAdapter(BaseAdapter):
             base_args = tokens[:exec_index]
             exec_args = tokens[exec_index + 1 :]
         else:
-            # Backward compatibility: if exec-only flags were placed before exec,
-            # move them to exec args.
             base_args = []
             exec_args = []
             for token in tokens:
@@ -68,9 +66,7 @@ class CodexVsCodeAgentAdapter(BaseAdapter):
     def _parse_thread_id(stdout: str) -> str | None:
         for line in stdout.splitlines():
             text = line.strip()
-            if not text:
-                continue
-            if not text.startswith("{"):
+            if not text or not text.startswith("{"):
                 continue
             try:
                 event = json.loads(text)
@@ -82,6 +78,42 @@ class CodexVsCodeAgentAdapter(BaseAdapter):
                     return thread_id
         return None
 
+    @staticmethod
+    def _native_binary_from_shim(shim_path: Path) -> Path | None:
+        npm_root = shim_path.parent
+        package_root = npm_root / "node_modules" / "@openai" / "codex"
+        if not package_root.exists():
+            return None
+
+        candidates = sorted(
+            package_root.glob("node_modules/@openai/codex-*/vendor/*/codex/codex.exe")
+        )
+        for candidate in candidates:
+            if candidate.is_file():
+                return candidate
+        return None
+
+    @classmethod
+    def _resolve_executable(cls, argv: list[str]) -> list[str]:
+        if not argv:
+            return argv
+
+        executable = argv[0]
+        explicit_path = Path(executable)
+        if explicit_path.is_file():
+            return [str(explicit_path), *argv[1:]]
+
+        resolved = shutil.which(executable)
+        if not resolved:
+            return argv
+
+        resolved_path = Path(resolved)
+        if os.name == "nt" and resolved_path.suffix.lower() in {".cmd", ".ps1"}:
+            native_binary = cls._native_binary_from_shim(resolved_path)
+            if native_binary is not None:
+                return [str(native_binary), *argv[1:]]
+        return [str(resolved_path), *argv[1:]]
+
     def invoke_with_session(
         self,
         command: str,
@@ -89,6 +121,8 @@ class CodexVsCodeAgentAdapter(BaseAdapter):
         session_id: str | None = None,
     ) -> InvocationResult:
         base_args, default_exec_args = self._split_command(command)
+        cli_base = self._resolve_executable(base_args)
+
         with tempfile.NamedTemporaryFile(
             mode="w",
             suffix=".txt",
@@ -99,7 +133,7 @@ class CodexVsCodeAgentAdapter(BaseAdapter):
 
         try:
             if session_id:
-                cli_args = base_args + [
+                cli_args = cli_base + [
                     "exec",
                     *default_exec_args,
                     "resume",
@@ -107,22 +141,23 @@ class CodexVsCodeAgentAdapter(BaseAdapter):
                     "--output-last-message",
                     str(output_path),
                     session_id,
-                    prompt,
+                    "-",
                 ]
             else:
-                cli_args = base_args + [
+                cli_args = cli_base + [
                     "exec",
                     *default_exec_args,
                     "--json",
                     "--output-last-message",
                     str(output_path),
-                    prompt,
+                    "-",
                 ]
 
             env = os.environ.copy()
             env["AGENTSQUAD_PROMPT"] = prompt
             completed = subprocess.run(
                 cli_args,
+                input=prompt,
                 capture_output=True,
                 text=True,
                 shell=False,
@@ -147,6 +182,3 @@ class CodexVsCodeAgentAdapter(BaseAdapter):
                 output_path.unlink(missing_ok=True)
             except OSError:
                 pass
-
-
-CodexAdapter = CodexVsCodeAgentAdapter

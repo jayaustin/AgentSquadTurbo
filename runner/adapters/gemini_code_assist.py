@@ -11,5 +11,5 @@ class GeminiCodeAssistAdapter(BaseAdapter):
     def invoke(self, command: str, prompt: str) -> str:
         raise AdapterError(
             "Gemini Code Assist adapter is not implemented yet. "
-            "Keep host.primary_adapter=codex or implement runner/adapters/gemini_code_assist.py."
+            "Keep host.primary_adapter=codex-cli or host.primary_adapter=codex-vscode-agent, or implement runner/adapters/gemini_code_assist.py."
         )

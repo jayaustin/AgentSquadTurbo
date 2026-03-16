@@ -4,7 +4,8 @@ from .antigravity import AntiGravityAdapter
 from .base import AdapterError, BaseAdapter
 from .claude_code import ClaudeCodeAdapter
 from .cline import ClineAdapter
-from .codex import CodexAdapter
+from .codex import CodexVsCodeAgentAdapter
+from .codex_cli import CodexCliAdapter
 from .continue_dev import ContinueAdapter
 from .cursor import CursorAdapter
 from .gemini_code_assist import GeminiCodeAssistAdapter
@@ -18,7 +19,9 @@ ADAPTER_TYPES = {
     "antigravity": AntiGravityAdapter,
     "claude-code": ClaudeCodeAdapter,
     "cline": ClineAdapter,
-    "codex": CodexAdapter,
+    "codex-cli": CodexCliAdapter,
+    "codex-vscode-agent": CodexVsCodeAgentAdapter,
+    "codex": CodexVsCodeAgentAdapter,
     "continue": ContinueAdapter,
     "cursor": CursorAdapter,
     "gemini-code-assist": GeminiCodeAssistAdapter,

@@ -1153,7 +1153,8 @@
         "antigravity",
         "claude-code",
         "cline",
-        "codex",
+        "codex-cli",
+        "codex-vscode-agent",
         "continue",
         "cursor",
         "gemini-code-assist",
@@ -2273,13 +2274,13 @@
         '<select id="setting-host-primary-adapter">' +
           optionListHtml(SETTINGS_OPTIONS.hostPrimaryAdapter, host.primary_adapter) +
         "</select>",
-        '<div class="settings-hint">Config key: <code>host.primary_adapter</code></div>',
+        '<div class="settings-hint">Config key: <code>host.primary_adapter</code>. Use <code>codex-cli</code> for the standalone CLI or <code>codex-vscode-agent</code> for the original VS Code agent flow.</div>',
         "</div>",
 
         '<div class="settings-field">',
         '<label for="setting-host-adapter-command">Adapter Command</label>',
         '<input id="setting-host-adapter-command" type="text" required value="' + esc(String(host.adapter_command || "")) + '">',
-        '<div class="settings-hint">Config key: <code>host.adapter_command</code> (required).</div>',
+        '<div class="settings-hint">Config key: <code>host.adapter_command</code> (required). Default: <code>codex --sandbox workspace-write --ask-for-approval never exec --ephemeral</code></div>',
         "</div>",
 
         '<div class="settings-field">',
