@@ -1230,6 +1230,10 @@
     let initSubmitInFlight = false;
     let initStatusText = "";
     let topWarningText = "";
+    const ACTIVITY_PAGE_SIZE = 100;
+    const ACTIVITY_SCROLL_LOAD_THRESHOLD_PX = 48;
+    let activityVisibleCount = ACTIVITY_PAGE_SIZE;
+    let activityScrollWired = false;
 
     function esc(text) {
       return String(text ?? "")
@@ -1641,6 +1645,9 @@
         panel.classList.toggle("active", activeTab === tab.id);
       });
       safeStorageSet(STORAGE_KEYS.activeTab, activeTab);
+      if (activeTab === "activity") {
+        window.requestAnimationFrame(maybeLoadMoreActivityOnScroll);
+      }
     }
 
     function openDocumentsTabForPath(path) {
@@ -3328,6 +3335,85 @@
         "</div>";
     }
 
+    function activityEvents() {
+      return Array.isArray(DATA.activity_log) ? DATA.activity_log : [];
+    }
+
+    function documentScrollHeight() {
+      return Math.max(
+        document.body ? document.body.scrollHeight : 0,
+        document.documentElement ? document.documentElement.scrollHeight : 0
+      );
+    }
+
+    function viewportHeight() {
+      return window.innerHeight || document.documentElement.clientHeight || 0;
+    }
+
+    function captureActivityScrollContext(mode) {
+      if (activeTab !== "activity") {
+        return null;
+      }
+      const root = document.getElementById("activity-log");
+      if (!root) {
+        return null;
+      }
+      const scrollY = window.scrollY || window.pageYOffset || 0;
+      const rootTop = root.getBoundingClientRect().top + scrollY;
+      return {
+        mode,
+        scrollY,
+        documentHeight: documentScrollHeight(),
+        userPastActivityTop: scrollY > rootTop + 8
+      };
+    }
+
+    function restoreActivityScrollContext(context) {
+      if (!context) {
+        return;
+      }
+      window.requestAnimationFrame(() => {
+        const newDocumentHeight = documentScrollHeight();
+        let targetY = context.scrollY;
+        if (context.mode === "prepend_new" && context.userPastActivityTop) {
+          targetY += Math.max(0, newDocumentHeight - context.documentHeight);
+        }
+        const maxScrollY = Math.max(0, newDocumentHeight - viewportHeight());
+        window.scrollTo(0, Math.max(0, Math.min(targetY, maxScrollY)));
+      });
+    }
+
+    function maybeLoadMoreActivityOnScroll() {
+      if (activeTab !== "activity") {
+        return;
+      }
+      const events = activityEvents();
+      if (!events.length || activityVisibleCount >= events.length) {
+        return;
+      }
+      const pageBottom = (window.scrollY || window.pageYOffset || 0) + viewportHeight();
+      if (pageBottom < documentScrollHeight() - ACTIVITY_SCROLL_LOAD_THRESHOLD_PX) {
+        return;
+      }
+      const previousVisibleCount = activityVisibleCount;
+      activityVisibleCount = Math.min(events.length, activityVisibleCount + ACTIVITY_PAGE_SIZE);
+      if (activityVisibleCount === previousVisibleCount) {
+        return;
+      }
+      const scrollContext = captureActivityScrollContext("append_old");
+      renderActivity();
+      restoreActivityScrollContext(scrollContext);
+    }
+
+    function wireActivityScrollLoader() {
+      if (activityScrollWired) {
+        return;
+      }
+      activityScrollWired = true;
+      window.addEventListener("scroll", maybeLoadMoreActivityOnScroll, { passive: true });
+      window.addEventListener("resize", maybeLoadMoreActivityOnScroll);
+    }
+
     function groupConsecutiveActivity(events) {
       const groups = [];
       let current = null;
@@ -3410,15 +3496,23 @@
     }
 
     function renderActivity() {
-      const events = DATA.activity_log || [];
+      const events = activityEvents();
       renderActivityLiveSummary(events);
       const root = document.getElementById("activity-log");
       if (!events.length) {
         root.innerHTML = '<p class="empty">No activity yet. Events appear here after orchestrator runs.</p>';
         return;
       }
-      const groupedEvents = groupConsecutiveActivity(events);
-      root.innerHTML = groupedEvents.map(activityGroupHtml).join("");
+      const visibleEvents = events.slice(0, Math.min(activityVisibleCount, events.length));
+      const groupedEvents = groupConsecutiveActivity(visibleEvents);
+      const remainingCount = Math.max(0, events.length - visibleEvents.length);
+      const statusHtml = remainingCount > 0
+        ? '<p class="settings-hint">Showing the most recent ' + esc(String(visibleEvents.length)) +
+          ' of ' + esc(String(events.length)) + ' events. Scroll to the bottom to load ' +
+          esc(String(Math.min(ACTIVITY_PAGE_SIZE, remainingCount))) + ' more.</p>'
+        : "";
+      root.innerHTML = groupedEvents.map(activityGroupHtml).join("") + statusHtml;
+      window.requestAnimationFrame(maybeLoadMoreActivityOnScroll);
     }
 
     function renderAgentPanel(agent) {
@@ -3597,6 +3691,7 @@
       renderProject();
       renderDocuments();
       initTaskControls();
+      wireActivityScrollLoader();
       renderTasks();
       renderActivity();
       renderAgents();
@@ -3606,9 +3701,44 @@
       if (!HAS_API) {
         return;
       }
+      const previousActivityTotal = activityEvents().length;
+      const activityScrollContext = captureActivityScrollContext("keep");
       const response = await fetchJson("/api/dashboard");
-      applyDashboardPayload(response.dashboard || {});
+      const nextPayload = response.dashboard || {};
+      const nextActivityTotal = Array.isArray(nextPayload.activity_log) ? nextPayload.activity_log.length : 0;
+      let activityRestoreMode = "keep";
+      if (nextActivityTotal > previousActivityTotal) {
+        activityRestoreMode = "prepend_new";
+        const shouldPreserveLoadedWindow =
+          activityVisibleCount > ACTIVITY_PAGE_SIZE ||
+          Boolean(activityScrollContext && activityScrollContext.userPastActivityTop);
+        if (shouldPreserveLoadedWindow) {
+          activityVisibleCount = Math.min(
+            nextActivityTotal,
+            activityVisibleCount + (nextActivityTotal - previousActivityTotal)
+          );
+        } else {
+          activityVisibleCount = Math.min(
+            nextActivityTotal,
+            Math.max(ACTIVITY_PAGE_SIZE, activityVisibleCount)
+          );
+        }
+      } else {
+        activityVisibleCount = Math.min(
+          activityVisibleCount,
+          Math.max(ACTIVITY_PAGE_SIZE, nextActivityTotal)
+        );
+      }
+      applyDashboardPayload(nextPayload);
       renderAllPanels();
+      if (activityScrollContext) {
+        restoreActivityScrollContext({
+          mode: activityRestoreMode,
+          scrollY: activityScrollContext.scrollY,
+          documentHeight: activityScrollContext.documentHeight,
+          userPastActivityTop: activityScrollContext.userPastActivityTop
+        });
+      }
     }
 
     function queueDashboardRefresh() {
