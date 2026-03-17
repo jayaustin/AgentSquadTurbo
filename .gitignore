@@ -21,6 +21,15 @@ $RECYCLE.BIN/
 *.swo
 *~
 
+# AI assistant session directories
+.claude/
+.cursor/
+.continue/
+.cline/
+.windsurf/
+.aider/
+.copilot/
+
 # Python cache and bytecode
 __pycache__/
 *.py[cod]

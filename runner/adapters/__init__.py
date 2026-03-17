@@ -2,7 +2,8 @@
 
 from .antigravity import AntiGravityAdapter
 from .base import AdapterError, BaseAdapter
-from .claude_code import ClaudeCodeAdapter
+from .claude_code_cli import ClaudeCodeCliAdapter
+from .claude_code_vscode_agent import ClaudeCodeVSCodeAgentAdapter
 from .cline import ClineAdapter
 from .codex_vscode_agent import CodexVsCodeAgentAdapter
 from .codex_cli import CodexCliAdapter
@@ -17,7 +18,9 @@ from .windsurf import WindsurfAdapter
 
 ADAPTER_TYPES = {
     "antigravity": AntiGravityAdapter,
-    "claude-code": ClaudeCodeAdapter,
+    "claude-code-cli": ClaudeCodeCliAdapter,
+    "claude-code-vscode-agent": ClaudeCodeVSCodeAgentAdapter,
+    "claude-code": ClaudeCodeCliAdapter,  # Default alias for CLI
     "cline": ClineAdapter,
     "codex-cli": CodexCliAdapter,
     "codex-vscode-agent": CodexVsCodeAgentAdapter,
