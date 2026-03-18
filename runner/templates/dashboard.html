@@ -597,14 +597,169 @@
       background: rgba(59, 130, 246, 0.15);
     }
     .right-view {
-      padding: 12px;
+      padding: 18px 20px;
       overflow: visible;
       max-height: none;
     }
     .doc-path {
-      margin: 0 0 10px 0;
+      margin: 0 0 14px 0;
       font-size: 0.84rem;
       color: var(--muted);
+    }
+    .markdown-render {
+      color: var(--text);
+      line-height: 1.68;
+      overflow-wrap: anywhere;
+    }
+    .markdown-render > :first-child {
+      margin-top: 0;
+    }
+    .markdown-render > :last-child {
+      margin-bottom: 0;
+    }
+    .markdown-render h1,
+    .markdown-render h2,
+    .markdown-render h3,
+    .markdown-render h4,
+    .markdown-render h5,
+    .markdown-render h6 {
+      margin: 1.4em 0 0.55em 0;
+      line-height: 1.24;
+      color: #f8fafc;
+    }
+    .markdown-render h1 {
+      font-size: 1.9rem;
+    }
+    .markdown-render h2 {
+      font-size: 1.55rem;
+      padding-bottom: 0.2em;
+      border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .markdown-render h3 {
+      font-size: 1.28rem;
+    }
+    .markdown-render h4 {
+      font-size: 1.08rem;
+    }
+    .markdown-render p,
+    .markdown-render ul,
+    .markdown-render ol,
+    .markdown-render pre,
+    .markdown-render blockquote,
+    .markdown-render dl,
+    .markdown-render details,
+    .markdown-render .markdown-table-wrap {
+      margin: 0 0 1em 0;
+    }
+    .markdown-render ul,
+    .markdown-render ol {
+      padding-left: 1.5rem;
+    }
+    .markdown-render li {
+      margin: 0.28em 0;
+    }
+    .markdown-render li > ul,
+    .markdown-render li > ol {
+      margin-top: 0.35em;
+      margin-bottom: 0.45em;
+    }
+    .markdown-render blockquote {
+      padding: 0.15rem 0 0.15rem 1rem;
+      border-left: 4px solid #3b82f6;
+      color: #cbd5e1;
+      background: rgba(30, 41, 59, 0.38);
+      border-radius: 0 8px 8px 0;
+    }
+    .markdown-render hr {
+      border: 0;
+      border-top: 1px solid rgba(148, 163, 184, 0.24);
+      margin: 1.5em 0;
+    }
+    .markdown-render a {
+      color: #93c5fd;
+      text-decoration: underline;
+      text-underline-offset: 2px;
+    }
+    .markdown-render img {
+      display: block;
+      max-width: 100%;
+      height: auto;
+      margin: 1rem 0;
+      border-radius: 10px;
+      border: 1px solid rgba(148, 163, 184, 0.2);
+    }
+    .markdown-render pre {
+      background: #0b1220;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 12px 14px;
+      overflow: auto;
+    }
+    .markdown-render code {
+      font-family: Consolas, "Courier New", monospace;
+      background: rgba(15, 23, 42, 0.95);
+      border-radius: 5px;
+      padding: 0.12em 0.36em;
+    }
+    .markdown-render pre code {
+      background: transparent;
+      padding: 0;
+      border-radius: 0;
+      white-space: pre;
+    }
+    .markdown-render .markdown-table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: rgba(15, 23, 42, 0.45);
+    }
+    .markdown-render table {
+      width: max-content;
+      min-width: 100%;
+      margin: 0;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+    }
+    .markdown-render th,
+    .markdown-render td {
+      border: 1px solid var(--border);
+      padding: 8px 10px;
+      vertical-align: top;
+    }
+    .markdown-render th {
+      position: static;
+      top: auto;
+      z-index: auto;
+      cursor: default;
+      user-select: text;
+      background: #17233a;
+      text-align: left;
+    }
+    .markdown-render tbody tr:nth-child(even) {
+      background: rgba(30, 41, 59, 0.35);
+    }
+    .markdown-render sup,
+    .markdown-render sub {
+      line-height: 0;
+    }
+    .markdown-render details {
+      padding: 0.7rem 0.85rem;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      background: rgba(15, 23, 42, 0.82);
+    }
+    .markdown-render summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #dbeafe;
+    }
+    .markdown-render .footnote {
+      margin-top: 1.25rem;
+      padding-top: 0.4rem;
+    }
+    .markdown-render .footnote-backref,
+    .markdown-render .footnote-ref {
+      text-decoration: none;
     }
     .controls {
       display: flex;
@@ -1058,7 +1213,7 @@
 <body>
   <div class="app">
     <div class="header">
-      <h1>AgentSquad Dashboard</h1>
+      <h1 id="header-title">AgentSquad Dashboard</h1>
       <div class="meta" id="header-meta"></div>
     </div>
     <div class="top-warning-banner" id="top-warning-banner" role="alert" aria-live="polite"></div>
@@ -1781,7 +1936,18 @@
     }
 
     function renderHeader() {
+      const headerTitle = document.getElementById("header-title");
       const meta = document.getElementById("header-meta");
+      const project = DATA.project || {};
+      const projectName = String(project.name || "").trim();
+      const dashboardTitle = projectName
+        ? projectName + " | AgentSquad Dashboard"
+        : "AgentSquad Dashboard";
+      if (headerTitle) {
+        headerTitle.textContent = dashboardTitle;
+      }
+      document.title = dashboardTitle;
+
       const status = computeHeaderStatusModel();
       let actionHtml = "";
       if (status.action) {
@@ -3107,12 +3273,11 @@
       const createdText = docTimestampText(active.created_at_utc);
       const modifiedText = docTimestampText(active.modified_at_utc);
       view.innerHTML =
-        "<h2>" + esc(active.title) + "</h2>" +
         '<p class="doc-path">' +
           fileLinkHtml(active.path, active.path) +
           "<br>Created: <strong>" + esc(createdText) + "</strong> | Last Modified: <strong>" + esc(modifiedText) + "</strong>" +
         "</p>" +
-        active.html;
+        '<div class="markdown-render">' + active.html + "</div>";
     }
 
     function renderTasks() {
@@ -3525,7 +3690,7 @@
         '<header class="agent-header" style="border-left-color:' + agent.color + '">',
         "<h3>" + esc(agent.display_name) + " (" + esc(agent.role_id) + ")</h3>",
         "</header>",
-        '<section class="agent-section"><h4>Role Context</h4>' + roleContextHtml + "</section>",
+        '<section class="agent-section"><h4>Role Context</h4><div class="markdown-render">' + roleContextHtml + "</div></section>",
         '<section class="agent-section"><h4>Activity</h4>',
         events.length ? '<div class="timeline">' + events.map(eventHtml).join("") + "</div>" :
           '<p class="empty">No activity for this agent yet.</p>',

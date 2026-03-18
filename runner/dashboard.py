@@ -5,10 +5,22 @@ from __future__ import annotations
 import hashlib
 import html
 import json
+import posixpath
 import re
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
+
+try:
+    import bleach
+except Exception:  # noqa: BLE001
+    bleach = None
+
+try:
+    import markdown as markdown_lib
+except Exception:  # noqa: BLE001
+    markdown_lib = None
 
 from . import backlog_store, validators
 
@@ -23,6 +35,64 @@ DEFAULT_FALLBACK_COLORS = [
     "#FB7185",
     "#2DD4BF",
 ]
+MARKDOWN_EXTENSIONS = ("extra", "sane_lists", "md_in_html")
+MARKDOWN_ALLOWED_TAGS = sorted(
+    set((bleach.sanitizer.ALLOWED_TAGS if bleach else [])).union(
+        {
+            "abbr",
+            "blockquote",
+            "br",
+            "code",
+            "dd",
+            "del",
+            "details",
+            "div",
+            "dl",
+            "dt",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "hr",
+            "img",
+            "li",
+            "ol",
+            "p",
+            "pre",
+            "span",
+            "sub",
+            "summary",
+            "sup",
+            "table",
+            "tbody",
+            "td",
+            "tfoot",
+            "th",
+            "thead",
+            "tr",
+            "ul",
+        }
+    )
+)
+MARKDOWN_ALLOWED_ATTRIBUTES: dict[str, list[str]] = {
+    "*": ["class", "id"],
+    "a": ["href", "title"],
+    "img": ["src", "alt", "title"],
+    "ol": ["start"],
+    "td": ["align", "colspan", "rowspan"],
+    "th": ["align", "colspan", "rowspan"],
+}
+TABLE_BLOCK_PATTERN = re.compile(r"(<table>.*?</table>)", flags=re.DOTALL | re.IGNORECASE)
+RESOURCE_URL_PATTERN = re.compile(
+    r'(<(?P<tag>a|img)\b[^>]*?\b(?P<attr>href|src)=")(?P<url>[^"]+)(")',
+    flags=re.IGNORECASE,
+)
+UNSAFE_BLOCK_PATTERN = re.compile(
+    r"<(?P<tag>script|style|iframe|object|embed)\b.*?>.*?</(?P=tag)>",
+    flags=re.DOTALL | re.IGNORECASE,
+)
 
 
 def _canonical_primary_adapter(value: Any) -> str:
@@ -50,7 +120,7 @@ def _strip_frontmatter(markdown_text: str) -> str:
     return markdown_text
 
 
-def _markdown_to_html(markdown_text: str) -> str:
+def _markdown_to_html_fallback(markdown_text: str) -> str:
     """Minimal markdown renderer using only stdlib."""
 
     def inline_markup(text: str) -> str:
@@ -151,6 +221,69 @@ def _markdown_to_html(markdown_text: str) -> str:
     return "\n".join(out)
 
 
+def _rewrite_relative_resource_url(raw_url: str, source_path: str) -> str:
+    parsed = urlsplit(str(raw_url or "").strip())
+    if parsed.scheme or parsed.netloc:
+        return raw_url
+    if raw_url.startswith(("#", "/")):
+        return raw_url
+
+    base_dir = PurePosixPath(source_path).parent.as_posix()
+    normalized_path = posixpath.normpath(posixpath.join(base_dir, parsed.path))
+    if normalized_path in {"", "."}:
+        normalized_path = parsed.path
+    if normalized_path == ".." or normalized_path.startswith("../"):
+        return raw_url
+    rewritten_path = (
+        normalized_path[2:] if normalized_path.startswith("./") else normalized_path
+    )
+    return urlunsplit(("", "", rewritten_path, parsed.query, parsed.fragment))
+
+
+def _rewrite_markdown_resource_urls(rendered_html: str, source_path: str) -> str:
+    if not source_path:
+        return rendered_html
+
+    def _replace(match: re.Match[str]) -> str:
+        rewritten = _rewrite_relative_resource_url(match.group("url"), source_path)
+        return f"{match.group(1)}{html.escape(rewritten, quote=True)}{match.group(5)}"
+
+    return RESOURCE_URL_PATTERN.sub(_replace, rendered_html)
+
+
+def _wrap_markdown_tables(rendered_html: str) -> str:
+    return TABLE_BLOCK_PATTERN.sub(r'<div class="markdown-table-wrap">\1</div>', rendered_html)
+
+
+def _strip_unsafe_html_blocks(rendered_html: str) -> str:
+    return UNSAFE_BLOCK_PATTERN.sub("", rendered_html)
+
+
+def _markdown_to_html(markdown_text: str, *, source_path: str = "") -> str:
+    if markdown_lib is None or bleach is None:
+        return _markdown_to_html_fallback(markdown_text)
+
+    try:
+        rendered = markdown_lib.markdown(
+            markdown_text,
+            extensions=list(MARKDOWN_EXTENSIONS),
+            output_format="html5",
+        )
+    except Exception:  # noqa: BLE001
+        return _markdown_to_html_fallback(markdown_text)
+
+    rendered = _strip_unsafe_html_blocks(rendered)
+    rendered = _rewrite_markdown_resource_urls(rendered, source_path)
+    rendered = _wrap_markdown_tables(rendered)
+    return bleach.clean(
+        rendered,
+        tags=MARKDOWN_ALLOWED_TAGS,
+        attributes=MARKDOWN_ALLOWED_ATTRIBUTES,
+        protocols=set(bleach.sanitizer.ALLOWED_PROTOCOLS),
+        strip=True,
+    )
+
+
 def _read_jsonl(
     path: Path,
     *,
@@ -233,7 +366,7 @@ def _collect_documents(root: Path, dashboard_cfg: dict[str, Any]) -> list[dict[s
                 "is_primary": primary,
                 "created_at_utc": _format_utc_timestamp(created_ts),
                 "modified_at_utc": _format_utc_timestamp(modified_ts),
-                "html": _markdown_to_html(text),
+                "html": _markdown_to_html(text, source_path=rel),
             }
         )
         seen.add(rel)
@@ -322,13 +455,14 @@ def _build_payload(root: Path, repo_root_relative_prefix: str, output_path: str)
             role_text = _strip_frontmatter(
                 role_path.read_text(encoding="utf-8", errors="replace")
             )
+        role_rel_path = role_path.relative_to(root).as_posix() if role_path.exists() else ""
         role_entries.append(
             {
                 "role_id": role_id,
                 "display_name": role_display_names.get(role_id, role_id.replace("-", " ").title()),
                 "color": role_colors.get(role_id, _fallback_color(role_id)),
                 "enabled": bool(role_id in enabled_set and role_id not in disabled_set),
-                "role_context_html": _markdown_to_html(role_text),
+                "role_context_html": _markdown_to_html(role_text, source_path=role_rel_path),
                 "activity": per_role_logs.get(role_id, []),
             }
         )
