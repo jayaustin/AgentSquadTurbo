@@ -21,6 +21,10 @@ Return ONLY valid JSON following the `operator_plan` contract.
   unless the human has explicitly approved governance edits.
 - Do not include markdown fences.
 
+## Host Execution Guidance
+
+{{HOST_EXECUTION_GUIDANCE}}
+
 ## Human Request
 
 {{HUMAN_REQUEST}}

@@ -156,6 +156,14 @@ ROLE_REVIEW_TOKEN_STOPWORDS = {
 }
 UNSET_VALUE_MARKERS = {"", "tbd", "todo", "n/a", "na", "unknown"}
 DEFAULT_OPERATOR_BOOTSTRAP_PACKET = "project/state/operator-bootstrap.md"
+NATIVE_SUBAGENT_TOOL_NAMES = {
+    "spawn_agent",
+    "send_input",
+    "wait",
+    "wait_agent",
+    "resume_agent",
+    "close_agent",
+}
 
 ROLE_DEFINITIONS: dict[str, dict[str, Any]] = {
     "operator": {
@@ -576,6 +584,186 @@ def _render_template(template_text: str, replacements: dict[str, str]) -> str:
 
 def _load_template(root: Path, file_name: str) -> str:
     return (root / "runner" / "templates" / file_name).read_text(encoding="utf-8")
+
+
+def _compact_inline_text(value: Any, max_len: int = 180) -> str:
+    text = " ".join(str(value or "").split())
+    if len(text) <= max_len:
+        return text
+    return text[: max_len - 3].rstrip() + "..."
+
+
+def _titleize_token(value: str, fallback: str = "Logged") -> str:
+    token = str(value or "").strip().replace("-", " ").replace("_", " ")
+    if not token:
+        return fallback
+    return token.title()
+
+
+def _build_native_subagent_activity_records(
+    adapter_id: str,
+    host_events: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    if adapter_id not in {"codex-cli", "codex-vscode-agent"}:
+        return []
+
+    records: list[dict[str, Any]] = []
+    for event in host_events:
+        event_name = str(event.get("type", "")).strip()
+        item = event.get("item")
+        if not isinstance(item, dict) or item.get("type") != "collab_tool_call":
+            continue
+
+        tool = str(item.get("tool", "")).strip()
+        receiver_thread_ids = [
+            str(thread_id).strip()
+            for thread_id in item.get("receiver_thread_ids", [])
+            if str(thread_id).strip()
+        ]
+        if tool not in NATIVE_SUBAGENT_TOOL_NAMES and not receiver_thread_ids:
+            continue
+
+        prompt_excerpt = _compact_inline_text(item.get("prompt", ""), max_len=220)
+        sender_thread_id = str(item.get("sender_thread_id", "")).strip()
+        item_status = _titleize_token(str(item.get("status", "")).strip(), fallback="Logged")
+        metadata = {
+            "adapter_id": adapter_id,
+            "adapter_event_type": event_name,
+            "tool": tool,
+            "sender_thread_id": sender_thread_id,
+            "receiver_thread_ids": receiver_thread_ids,
+            "item_status": str(item.get("status", "")).strip(),
+            "prompt_excerpt": prompt_excerpt,
+        }
+
+        if event_name == "item.started" and tool == "spawn_agent":
+            summary = "Codex requested a native subagent spawn."
+            if prompt_excerpt:
+                summary += f" Prompt: {prompt_excerpt}"
+            records.append(
+                {
+                    "event_type": "native_subagent_spawn_requested",
+                    "summary": summary,
+                    "status": "In Progress",
+                    "metadata": metadata,
+                }
+            )
+            continue
+
+        if event_name == "item.completed" and tool == "spawn_agent":
+            summary = "Codex spawned native subagent thread(s)."
+            if receiver_thread_ids:
+                summary += f" Threads: {', '.join(receiver_thread_ids)}."
+            if prompt_excerpt:
+                summary += f" Prompt: {prompt_excerpt}"
+            records.append(
+                {
+                    "event_type": "native_subagent_spawned",
+                    "summary": summary,
+                    "status": "Spawned",
+                    "metadata": metadata,
+                }
+            )
+            continue
+
+        if event_name == "item.completed" and tool in {"wait", "wait_agent"}:
+            agent_states = item.get("agents_states", {})
+            if isinstance(agent_states, dict) and agent_states:
+                for subagent_id, state in agent_states.items():
+                    state_dict = state if isinstance(state, dict) else {}
+                    subagent_status_raw = str(state_dict.get("status", "")).strip()
+                    subagent_status = _titleize_token(subagent_status_raw, fallback="Completed")
+                    message_excerpt = _compact_inline_text(
+                        state_dict.get("message", ""),
+                        max_len=200,
+                    )
+                    state_metadata = dict(metadata)
+                    state_metadata.update(
+                        {
+                            "subagent_id": str(subagent_id).strip(),
+                            "subagent_status": subagent_status_raw,
+                            "subagent_message_excerpt": message_excerpt,
+                        }
+                    )
+                    summary = (
+                        f"Codex native subagent '{subagent_id}' reported status "
+                        f"'{subagent_status}'."
+                    )
+                    if message_excerpt:
+                        summary += f" Result: {message_excerpt}"
+                    records.append(
+                        {
+                            "event_type": "native_subagent_status",
+                            "summary": summary,
+                            "status": subagent_status,
+                            "metadata": state_metadata,
+                        }
+                    )
+                continue
+
+        if event_name == "item.completed":
+            summary = f"Codex completed native subagent tool '{tool}'."
+            if receiver_thread_ids:
+                summary += f" Threads: {', '.join(receiver_thread_ids)}."
+            records.append(
+                {
+                    "event_type": "native_subagent_tool_completed",
+                    "summary": summary,
+                    "status": item_status,
+                    "metadata": metadata,
+                }
+            )
+
+    return records
+
+
+def _emit_native_subagent_logs(
+    root: Path,
+    role_id: str,
+    task_id: str,
+    adapter_id: str,
+    host_events: list[dict[str, Any]],
+) -> tuple[list[str], list[dict[str, Any]]]:
+    records = _build_native_subagent_activity_records(adapter_id, host_events)
+    if not records:
+        return [], []
+
+    event_lines: list[str] = []
+    for record in records:
+        logging_store.write_activity_event(
+            root=root,
+            role_id=role_id,
+            task_id=task_id,
+            event_type=record["event_type"],
+            summary=record["summary"],
+            status=record["status"],
+            metadata=record["metadata"],
+        )
+        event_lines.append(f"{record['event_type']}: {record['summary']}")
+    return event_lines, records
+
+
+def _host_execution_guidance(runtime: dict[str, Any], role_id: str) -> str:
+    if not runtime.get("host_supports_native_subagents", False):
+        return (
+            "No host-native subagent support is assumed for this adapter. "
+            "Complete the task directly in this role thread."
+        )
+
+    if role_id == "operator":
+        return (
+            "This Codex host supports native subagents. Use them when a bounded planning, "
+            "inspection, or review subtask will materially improve quality or speed, but keep "
+            "all canonical backlog decisions in the Operator thread."
+        )
+
+    return (
+        "This Codex host supports native subagents. Prefer native subagents for bounded "
+        "internal worker threads such as focused repository inspection, targeted research, "
+        "isolated validation, or disjoint implementation work that supports this assigned task. "
+        "Keep backlog ownership and the final JSON return in the current role thread. Do not "
+        "use subagents to bypass AgentSquad's sequential backlog policy or governance rules."
+    )
 
 
 def _safe_segment(value: str) -> str:
@@ -1104,7 +1292,7 @@ def _invoke_with_retry(
     known_roles: set[str],
     context_hash: str,
     session_plan: dict[str, Any],
-) -> tuple[dict[str, Any], str, list[str]]:
+) -> tuple[dict[str, Any], str, list[str], list[dict[str, Any]]]:
     strict_suffix = (
         "\n\nSTRICT RETRY: return exactly one JSON object with no markdown, no prose, "
         "and no trailing text."
@@ -1116,6 +1304,7 @@ def _invoke_with_retry(
     session_id = session_plan.get("session_id")
     refresh_reasons = list(session_plan.get("refresh_reasons", []))
     reused_existing = bool(session_plan.get("reuse", False))
+    host_events: list[dict[str, Any]] = []
 
     for attempt in (1, 2):
         candidate_prompt = prompt if attempt == 1 else prompt + strict_suffix
@@ -1126,6 +1315,7 @@ def _invoke_with_retry(
         )
         raw = result.output
         last_raw = raw
+        host_events = list(result.host_events or [])
         if result.session_id:
             session_id = result.session_id
         try:
@@ -1156,7 +1346,7 @@ def _invoke_with_retry(
                 session_events.extend([f"session_policy={reason}" for reason in refresh_reasons])
             else:
                 session_events.append("session_policy=stateless-mode")
-            return parsed, raw, session_events
+            return parsed, raw, session_events, host_events
         except Exception as exc:  # noqa: BLE001
             last_exc = exc
     raise OrchestrationHalt(
@@ -1190,7 +1380,11 @@ def _runtime(root: Path) -> dict[str, Any]:
         "disabled_roles": disabled_roles,
         "statuses": statuses,
         "adapter": adapter,
+        "adapter_id": getattr(adapter, "adapter_id", adapter_name),
         "adapter_command": adapter_command,
+        "host_supports_native_subagents": bool(
+            getattr(adapter, "supports_native_subagents", False)
+        ),
         "session_mode": session_mode,
         "context_rot_guardrails": context_rot_guardrails,
         "unexpected_event_policy": (
@@ -1910,12 +2104,13 @@ def _invoke_operator(
             "BACKLOG_MARKDOWN": backlog_before,
             "CONTEXT_MANIFEST": manifest_text,
             "CONTEXT_TEXT": context_text,
+            "HOST_EXECUTION_GUIDANCE": _host_execution_guidance(runtime, "operator"),
             "JSON_CONTRACTS": contracts_doc,
         },
     )
 
     before_files = _capture_file_snapshot(root)
-    parsed, raw_output, session_events = _invoke_with_retry(
+    parsed, raw_output, session_events, host_events = _invoke_with_retry(
         runtime=runtime,
         state=state,
         role_id="operator",
@@ -1928,6 +2123,13 @@ def _invoke_operator(
     )
     after_files = _capture_file_snapshot(root)
     invocation_file_changes = _diff_file_snapshots(before_files, after_files)
+    native_subagent_events, native_subagent_records = _emit_native_subagent_logs(
+        root=root,
+        role_id="operator",
+        task_id=f"operator-{mode_label}",
+        adapter_id=runtime["adapter_id"],
+        host_events=host_events,
+    )
     file_change_events = _emit_file_change_logs(
         root=root,
         role_id="operator",
@@ -1973,6 +2175,7 @@ def _invoke_operator(
         f"({len(manifest_paths)} files); reasons={', '.join(refresh_reasons)}"
     )
     run_events.extend(session_events)
+    run_events.extend(native_subagent_events)
     run_events.extend(file_change_events)
     run_events.extend(
         _emit_decision_logs(
@@ -2071,6 +2274,7 @@ def _invoke_operator(
             "mode": mode_label,
             "tasks_generated": len(parsed.get("tasks", [])),
             "backlog_task_changes": backlog_task_changes,
+            "native_subagent_events": native_subagent_records,
             "unexpected_warning": unexpected_warning,
             "unexpected_error": unexpected_error,
         },
@@ -2270,6 +2474,7 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
             "BACKLOG_MARKDOWN": backlog_before,
             "CONTEXT_MANIFEST": manifest_text,
             "CONTEXT_TEXT": context_text,
+            "HOST_EXECUTION_GUIDANCE": _host_execution_guidance(runtime, owner),
             "JSON_CONTRACTS": contracts_doc,
         },
     )
@@ -2285,7 +2490,7 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
     )
 
     before_files = _capture_file_snapshot(root)
-    parsed, raw_output, session_events = _invoke_with_retry(
+    parsed, raw_output, session_events, host_events = _invoke_with_retry(
         runtime=runtime,
         state=state,
         role_id=owner,
@@ -2298,6 +2503,13 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
     )
     after_files = _capture_file_snapshot(root)
     invocation_file_changes = _diff_file_snapshots(before_files, after_files)
+    native_subagent_events, native_subagent_records = _emit_native_subagent_logs(
+        root=root,
+        role_id=owner,
+        task_id=task_id,
+        adapter_id=runtime["adapter_id"],
+        host_events=host_events,
+    )
     file_change_events = _emit_file_change_logs(
         root=root,
         role_id=owner,
@@ -2510,6 +2722,7 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
 
     backlog_after = backlog_store.render_backlog(backlog_store.read_backlog(backlog_path))
     events = [f"task={task_id}", f"owner={owner}", f"status={parsed['status']}"]
+    events.extend(native_subagent_events)
     events.extend(file_change_events)
     events.extend(
         _emit_decision_logs(
@@ -2555,6 +2768,7 @@ def execute_one_step(root: Path, runtime: dict[str, Any], state: dict[str, Any])
             "backlog_task_changes": backlog_task_changes,
             "role_feedback_count": len(role_feedback_entries),
             "human_feedback": bool(human_feedback),
+            "native_subagent_events": native_subagent_records,
             "unexpected_warning": overall_unexpected_warning,
             "unexpected_error": overall_unexpected_error,
         },

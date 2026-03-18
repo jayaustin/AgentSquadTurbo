@@ -16,6 +16,10 @@ Important constraints:
 - Do not modify `project/config/**`, `project/context/**`, or `steering/**`
   unless the human has explicitly approved governance edits.
 
+## Host Execution Guidance
+
+{{HOST_EXECUTION_GUIDANCE}}
+
 ## Task
 
 {{TASK_JSON}}

@@ -4,7 +4,8 @@ from __future__ import annotations
 
 import os
 import subprocess
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from typing import Any
 
 
 class AdapterError(RuntimeError):
@@ -26,12 +27,14 @@ class InvocationResult:
 
     output: str
     session_id: str | None = None
+    host_events: list[dict[str, Any]] = field(default_factory=list)
 
 
 class BaseAdapter:
     """Base adapter that invokes a local assistant command."""
 
     adapter_id = "base"
+    supports_native_subagents = False
 
     def invoke(self, command: str, prompt: str) -> str:
         if not command or "REPLACE_WITH_LOCAL_ASSISTANT_COMMAND" in command:
