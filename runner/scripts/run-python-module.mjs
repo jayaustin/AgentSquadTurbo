@@ -1,28 +1,8 @@
 #!/usr/bin/env node
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import process from "node:process";
-
-function resolvePythonCommand() {
-  const explicit = process.env.PYTHON;
-  const candidates = [];
-  if (explicit) {
-    candidates.push([explicit]);
-  }
-  candidates.push(["py", "-3"], ["python"], ["python3"]);
-
-  for (const candidate of candidates) {
-    const [command, ...baseArgs] = candidate;
-    const check = spawnSync(command, [...baseArgs, "--version"], {
-      stdio: "ignore",
-      windowsHide: true,
-    });
-    if (check.status === 0) {
-      return candidate;
-    }
-  }
-  return null;
-}
+import { pythonNotFoundMessage, resolvePythonCommand } from "./python-command.mjs";
 
 const args = process.argv.slice(2);
 if (!args.length) {
@@ -32,9 +12,7 @@ if (!args.length) {
 
 const python = resolvePythonCommand();
 if (!python) {
-  console.error(
-    "Python 3 was not found on PATH. Install Python 3 or set PYTHON to an executable path."
-  );
+  console.error(pythonNotFoundMessage());
   process.exit(1);
 }
 
@@ -56,4 +34,3 @@ child.on("exit", (code, signal) => {
   }
   process.exit(code ?? 1);
 });
-

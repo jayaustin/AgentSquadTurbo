@@ -4,6 +4,8 @@
   "private": true,
   "description": "Local orchestration and live dashboard launcher for AgentSquad.",
   "scripts": {
+    "postinstall": "node runner/scripts/install-python-requirements.mjs",
+    "install:python-requirements": "node runner/scripts/install-python-requirements.mjs",
     "dev": "node runner/scripts/run-python-module.mjs runner.server",
     "start": "npm run dev",
     "validate": "node runner/scripts/run-python-module.mjs runner.orchestrator validate",

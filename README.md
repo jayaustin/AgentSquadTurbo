@@ -44,7 +44,6 @@ That means this project is not just a prompt pack for an IDE plugin, and it is n
 
 - Python 3
 - Node.js and npm
-- Python packages from `requirements.txt`
 - One AI coding assistant with a working adapter integration
   - `Codex` is the default and tested path, so OpenAI Codex CLI should work out of the box once installed.
   - Other assistants such as `Claude Code`, `Cline`, `Cursor`, and similar tools can be used too, but only after you implement and configure a working adapter in `runner/adapters/`.
@@ -58,9 +57,10 @@ Best results come from keeping the files you want agents to manage **inside this
 2. Install the local launcher dependencies:
 
 ```bash
-python -m pip install -r requirements.txt
 npm install
 ```
+
+`npm install` also installs the Python packages from `requirements.txt` into the currently selected Python environment. If you need to target a specific interpreter, set `PYTHON` before running `npm install`.
 
 3. Start the local server:
 
