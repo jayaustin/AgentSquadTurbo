@@ -68,7 +68,13 @@ npm install
 npm run dev
 ```
 
-4. Open the dashboard in your browser:
+If port `4173` is already in use, AgentSquadTurbo now falls forward to the next open port automatically. You can also force a specific port:
+
+```bash
+npm run dev -- --port 4175
+```
+
+4. Open the dashboard URL printed in your terminal. The default is:
 
 ```text
 http://127.0.0.1:4173/
@@ -204,6 +210,7 @@ Most day-to-day use should happen through the dashboard plus either a CLI Operat
 
 ```bash
 python -m runner.server
+python -m runner.server --port 4175
 python -m runner.orchestrator bootstrap-operator --print-packet
 python -m runner.orchestrator validate
 python -m runner.orchestrator run --request "your request"

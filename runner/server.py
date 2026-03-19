@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import errno
 import json
 import mimetypes
 import queue
@@ -24,6 +25,7 @@ from . import dashboard, validators
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 4173
+DEFAULT_PORT_SCAN_LIMIT = 25
 SSE_HEARTBEAT_SECONDS = 15
 WATCH_INTERVAL_SECONDS = 1.0
 UNSET_VALUE_MARKERS = {"", "tbd", "todo", "n/a", "na", "unknown"}
@@ -916,6 +918,10 @@ def _build_handler(state: ServerState) -> type[BaseHTTPRequestHandler]:
 class AgentSquadHTTPServer(ThreadingHTTPServer):
     """HTTP server with quiet handling for expected client disconnects."""
 
+    # Windows will otherwise allow a second HTTPServer bind on an already-listening
+    # port, which defeats the fallback-to-next-port logic.
+    allow_reuse_address = not sys.platform.startswith("win")
+
     def handle_error(self, request: Any, client_address: tuple[str, int]) -> None:
         _, exc, _ = sys.exc_info()
         if isinstance(exc, (ConnectionAbortedError, ConnectionResetError, BrokenPipeError)):
@@ -925,14 +931,57 @@ class AgentSquadHTTPServer(ThreadingHTTPServer):
         super().handle_error(request, client_address)
 
 
-def run_server(root: Path, host: str, port: int) -> int:
-    state = ServerState(root=root)
-    state.start_watcher()
-    handler = _build_handler(state)
-    server = AgentSquadHTTPServer((host, port), handler)
-    server.daemon_threads = True
+def _is_address_in_use_error(exc: OSError) -> bool:
+    winerror = getattr(exc, "winerror", None)
+    return exc.errno == errno.EADDRINUSE or winerror in {10013, 10048}
 
-    print(f"AgentSquad local server running at http://{host}:{port}")
+
+def _bind_http_server(
+    host: str,
+    port: int,
+    handler: type[BaseHTTPRequestHandler],
+    *,
+    allow_port_fallback: bool,
+) -> tuple[AgentSquadHTTPServer, int]:
+    if port == 0:
+        server = AgentSquadHTTPServer((host, port), handler)
+        return server, int(server.server_address[1])
+
+    candidate_port = port
+    attempts_remaining = DEFAULT_PORT_SCAN_LIMIT if allow_port_fallback else 1
+
+    while attempts_remaining > 0:
+        try:
+            server = AgentSquadHTTPServer((host, candidate_port), handler)
+            return server, int(server.server_address[1])
+        except OSError as exc:
+            if not allow_port_fallback or not _is_address_in_use_error(exc):
+                raise
+            candidate_port += 1
+            attempts_remaining -= 1
+
+    highest_port = candidate_port - 1
+    raise OSError(
+        errno.EADDRINUSE,
+        f"No available port found between {port} and {highest_port}.",
+    )
+
+
+def run_server(root: Path, host: str, port: int, *, allow_port_fallback: bool = False) -> int:
+    state = ServerState(root=root)
+    handler = _build_handler(state)
+    server, bound_port = _bind_http_server(
+        host,
+        port,
+        handler,
+        allow_port_fallback=allow_port_fallback,
+    )
+    server.daemon_threads = True
+    state.start_watcher()
+
+    if bound_port != port:
+        print(f"Port {port} is already in use; using {bound_port} instead.")
+    print(f"AgentSquad local server running at http://{host}:{bound_port}")
     print(f"Repository root: {root.as_posix()}")
     print("Now open that URL in your browser and complete the Initialize tab steps.")
     print("After submitting project details, optionally tune settings/agents, then initialize Operator in your IDE.")
@@ -950,7 +999,15 @@ def run_server(root: Path, host: str, port: int) -> int:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Run AgentSquad local dashboard/orchestration server.")
     parser.add_argument("--host", default=DEFAULT_HOST, help="Bind address (default: 127.0.0.1).")
-    parser.add_argument("--port", default=DEFAULT_PORT, type=int, help="Bind port (default: 4173).")
+    parser.add_argument(
+        "--port",
+        default=None,
+        type=int,
+        help=(
+            "Bind port (default: 4173; when omitted and busy, the server uses the next "
+            "available port)."
+        ),
+    )
     parser.add_argument(
         "--root",
         default=".",
@@ -966,7 +1023,23 @@ def main(argv: list[str] | None = None) -> int:
     if not root.exists():
         print(f"Root path does not exist: {root}")
         return 1
-    return run_server(root=root, host=str(args.host), port=int(args.port))
+    port = DEFAULT_PORT if args.port is None else int(args.port)
+    allow_port_fallback = args.port is None
+    try:
+        return run_server(
+            root=root,
+            host=str(args.host),
+            port=port,
+            allow_port_fallback=allow_port_fallback,
+        )
+    except OSError as exc:
+        if _is_address_in_use_error(exc):
+            print(
+                f"Port {port} is already in use. Retry with --port <port>, or omit --port to "
+                "auto-select the next available port."
+            )
+            return 1
+        raise
 
 
 if __name__ == "__main__":

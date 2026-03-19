@@ -1915,7 +1915,7 @@
       const errors = initValidationErrors(fields);
       const missing = init.missing_fields || [];
       const pendingItems = init.pending_items || [];
-      const serverHint = HAS_API ? "" : "Direct submit requires the local server URL (http://127.0.0.1:4173).";
+      const serverHint = HAS_API ? "" : "Direct submit requires the local server URL, for example http://127.0.0.1:4173 or the alternate port printed when the server starts.";
       const editingLocked = settingsEditingLocked();
       const submitDisabled = initSubmitInFlight || !HAS_API || editingLocked;
       const projectSetupComplete = Boolean(init.project_setup_complete);
